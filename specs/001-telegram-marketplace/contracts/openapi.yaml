@@ -1,0 +1,195 @@
+openapi: 3.0.3
+info:
+  title: Telegram Marketplace Internal API
+  version: 0.1.0
+  description: Internal service endpoints supporting Telegram bot handlers.
+servers:
+  - url: http://localhost:8000
+paths:
+  /businesses:
+    post:
+      summary: Register a business (pending verification)
+      operationId: registerBusiness
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BusinessInput'
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Business' } } } }
+        '400': { description: Validation error }
+  /businesses/{businessId}/offers:
+    post:
+      summary: Create draft offer
+      operationId: createOffer
+      parameters:
+        - in: path
+          name: businessId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferInput'
+      responses:
+        '201': { description: Draft created, content: { application/json: { schema: { $ref: '#/components/schemas/Offer' } } } }
+        '400': { description: Validation error }
+        '403': { description: Business not verified }
+  /offers/{offerId}/publish:
+    post:
+      summary: Publish draft offer (becomes active)
+      operationId: publishOffer
+      parameters:
+        - in: path
+          name: offerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/Offer' } } } }
+        '404': { description: Offer not found }
+        '409': { description: Invalid state transition }
+  /offers/{offerId}/pause:
+    post:
+      summary: Pause active offer
+      operationId: pauseOffer
+      parameters:
+        - in: path
+          name: offerId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Paused, content: { application/json: { schema: { $ref: '#/components/schemas/Offer' } } } }
+        '404': { description: Offer not found }
+        '409': { description: Invalid state transition }
+  /offers/{offerId}/purchase:
+    post:
+      summary: Initiate purchase (returns payment checkout link)
+      operationId: initiatePurchase
+      parameters:
+        - in: path
+          name: offerId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseRequest'
+      responses:
+        '200': { description: Checkout initiated, content: { application/json: { schema: { $ref: '#/components/schemas/PurchaseInitResponse' } } } }
+        '400': { description: Validation error }
+        '404': { description: Offer not found }
+        '409': { description: Sold out or inactive }
+  /offers:
+    get:
+      summary: List active offers
+      operationId: listOffers
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+      responses:
+        '200': { description: List, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Offer' } } } } }
+  /purchases/{purchaseId}/cancel:
+    post:
+      summary: Cancel pending purchase before offer end_time
+      operationId: cancelPurchase
+      parameters:
+        - in: path
+          name: purchaseId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Canceled, content: { application/json: { schema: { $ref: '#/components/schemas/Purchase' } } } }
+        '404': { description: Purchase not found }
+        '409': { description: Cannot cancel (expired or confirmed) }
+components:
+  schemas:
+    BusinessInput:
+      type: object
+      required: [name, contact_handle, venue]
+      properties:
+        name: { type: string }
+        contact_handle: { type: string }
+        venue:
+          $ref: '#/components/schemas/VenueInput'
+    VenueInput:
+      type: object
+      required: [address_line1, city, postal_code, country]
+      properties:
+        address_line1: { type: string }
+        address_line2: { type: string }
+        city: { type: string }
+        postal_code: { type: string }
+        country: { type: string, minLength: 2, maxLength: 2 }
+        geo_lat: { type: number }
+        geo_lng: { type: number }
+    Business:
+      allOf:
+        - $ref: '#/components/schemas/BusinessInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            verification_status: { type: string, enum: [pending, approved, rejected] }
+            created_at: { type: string, format: date-time }
+    OfferInput:
+      type: object
+      required: [title, items, start_time, end_time]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        image_url: { type: string }
+    Item:
+      type: object
+      required: [name, unit_price, quantity_available]
+      properties:
+        name: { type: string }
+        unit_price: { type: number, minimum: 0 }
+        quantity_available: { type: integer, minimum: 0 }
+    Offer:
+      allOf:
+        - $ref: '#/components/schemas/OfferInput'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            business_id: { type: string, format: uuid }
+            status: { type: string, enum: [draft, active, paused, expired, sold_out] }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    PurchaseRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [item_name, quantity]
+            properties:
+              item_name: { type: string }
+              quantity: { type: integer, minimum: 1 }
+    PurchaseInitResponse:
+      type: object
+      properties:
+        checkout_url: { type: string }
+        expires_at: { type: string, format: date-time }
+    Purchase:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        offer_id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, confirmed, canceled] }
+        total_amount: { type: number }
+        payment_reference: { type: string }
+        payment_provider: { type: string, enum: [stripe] }
+        created_at: { type: string, format: date-time }
