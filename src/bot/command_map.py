@@ -16,6 +16,10 @@ from src.handlers.offer_posting.business_verify_handler import (
 from src.handlers.offer_posting.offer_draft_handler import get_offer_draft_handler
 from src.handlers.offer_posting.offer_publish_handler import get_publish_handler
 from src.handlers.purchasing.purchase_cancel_handler import get_cancellation_handler
+from src.handlers.system.start_handler import (
+    get_default_message_handler,
+    get_start_handler,
+)
 from src.logging import get_logger
 
 logger = get_logger(__name__)
@@ -29,6 +33,12 @@ def register_handlers(app: Application) -> None:
         app: Telegram bot Application instance
     """
     # Business registration flow (conversation)
+    # System handlers - startup and fallback for plain text
+    app.add_handler(get_start_handler())
+    logger.info("handler_registered", handler="start")
+    app.add_handler(get_default_message_handler())
+    logger.info("handler_registered", handler="default_message")
+
     app.add_handler(get_registration_handler())
     logger.info("handler_registered", handler="registration_conversation")
 
