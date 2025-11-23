@@ -101,10 +101,10 @@ class InventoryReservation:
                         yield reservation
                         return
 
-                    if offer_item.quantity_available < requested_qty:
+                    if offer_item.quantity < requested_qty:
                         reservation["error"] = (
                             f"Insufficient quantity for '{item_name}'. "
-                            f"Available: {offer_item.quantity_available}, "
+                            f"Available: {offer_item.quantity}, "
                             f"Requested: {requested_qty}"
                         )
                         yield reservation
@@ -112,9 +112,9 @@ class InventoryReservation:
 
                     reservation["items"].append(
                         {
-                            "item_name": item_name,
+                            "name": item_name,
                             "quantity": requested_qty,
-                            "unit_price": offer_item.unit_price,
+                            "unit_price": offer_item.discounted_price,
                         }
                     )
 
@@ -140,19 +140,35 @@ class InventoryReservation:
                 )
 
                 # Yield control to caller (purchase flow)
-                yield reservation
+                try:
+                    yield reservation
+                except Exception as e:
+                    # Exception occurred in caller code after successful reservation
+                    # Log it but don't re-yield (would cause "generator didn't stop" error)
+                    logger.error(
+                        "reservation_context_error",
+                        offer_id=str(offer_id),
+                        error=str(e),
+                        exc_info=True,
+                    )
+                    raise
 
                 # Lock released on context exit
 
             except Exception as e:
-                reservation["error"] = f"Reservation failed: {str(e)}"
-                logger.error(
-                    "reservation_error",
-                    offer_id=str(offer_id),
-                    error=str(e),
-                    exc_info=True,
-                )
-                yield reservation
+                # Exception during reservation setup (before yield)
+                if not reservation["success"]:
+                    reservation["error"] = f"Reservation failed: {str(e)}"
+                    logger.error(
+                        "reservation_error",
+                        offer_id=str(offer_id),
+                        error=str(e),
+                        exc_info=True,
+                    )
+                    yield reservation
+                else:
+                    # Exception after successful reservation, already logged above
+                    raise
 
     async def release_reservation(
         self,

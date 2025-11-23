@@ -74,34 +74,34 @@ Independent Test Criterion: A newly registered & verified business can create an
 - [x] T054 [US2] Add command/button mapping for purchase actions `src/bot/callback_map.py`  
 - [x] T055 [US2] Contract tests purchasing handlers `tests/contract/test_purchase_handlers.py`  
 - [x] T056 [US2] Integration test successful purchase `tests/integration/test_purchase_success_flow.py`  
-- [ ] T057 [US2] Integration test oversell attempt race condition `tests/integration/test_purchase_race_condition.py`  
-- [ ] T058 [US2] Unit test inventory reservation `tests/unit/test_inventory_reservation.py`  
-- [ ] T059 [US2] Unit test cancellation logic `tests/unit/test_cancellation_policy.py`  
+- [x] T057 [US2] Integration test oversell attempt race condition `tests/integration/test_purchase_race_condition.py`  
+- [x] T058 [US2] Unit test inventory reservation `tests/unit/test_inventory_reservation.py`  
+- [x] T059 [US2] Unit test cancellation logic `tests/unit/test_cancellation_policy.py`
 
 Independent Test Criterion: Customer can list offers, initiate purchase, complete payment, and receive confirmation with updated remaining quantity reflected.
 
 ## Phase 5: User Story 3 – Offer lifecycle management (P2)
-- [ ] T060 [US3] Implement pause offer handler `src/handlers/lifecycle/offer_pause_handler.py`  
-- [ ] T061 [P] [US3] Implement edit offer handler (price/quantity change) `src/handlers/lifecycle/offer_edit_handler.py`  
-- [ ] T062 [US3] Implement sold-out state transition logic `src/services/sold_out_transition.py`  
-- [ ] T063 [US3] Integration test pause behavior `tests/integration/test_offer_pause_flow.py`  
-- [ ] T064 [US3] Integration test edit update impacts discovery listing `tests/integration/test_offer_edit_flow.py`  
-- [ ] T065 [US3] Unit test sold-out transition `tests/unit/test_sold_out_transition.py`  
-- [ ] T066 [US3] Contract test lifecycle handlers `tests/contract/test_lifecycle_handlers.py`  
-- [ ] T067 [US3] Update command routing `/pause` `/edit` in `src/bot/command_map.py`  
+- [x] T060 [US3] Implement pause offer handler `src/handlers/lifecycle/offer_pause_handler.py`  
+- [x] T061 [P] [US3] Implement edit offer handler (price/quantity change) `src/handlers/lifecycle/offer_edit_handler.py`  
+- [x] T062 [US3] Implement sold-out state transition logic `src/services/sold_out_transition.py`  
+- [x] T063 [US3] Integration test pause behavior `tests/integration/test_offer_pause_flow.py`  
+- [x] T064 [US3] Integration test edit update impacts discovery listing `tests/integration/test_offer_edit_flow.py`  
+- [x] T065 [US3] Unit test sold-out transition `tests/unit/test_sold_out_transition.py`  
+- [x] T066 [US3] Contract test lifecycle handlers `tests/contract/test_lifecycle_handlers.py`  
+- [x] T067 [US3] Update command routing `/pause` `/edit` in `src/bot/command_map.py`  
 
 Independent Test Criterion: Business can pause, edit, and force sold-out transitions; customer view updates immediately and purchasing is blocked accordingly.
 
 ## Final Phase: Polish & Cross-Cutting
-- [ ] T068 Add structured audit logging for key actions `src/logging/audit.py`  
-- [ ] T069 [P] Add ruff/mypy CI pipeline config `.github/workflows/ci.yml`  
+- [x] T068 Add structured audit logging for key actions `src/logging/audit.py`  
+- [x] T069 [P] Add ruff/mypy CI pipeline config `.github/workflows/ci.yml`  
 - [ ] T070 Add performance smoke test `tests/integration/test_performance_smoke.py`  
 - [ ] T071 Add Sentry integration toggle `src/logging/sentry_integration.py`  
-- [ ] T072 [P] Add README section for deployment & env hardening `README.md`  
-- [ ] T073 Add security review checklist `docs/security-checklist.md`  
-- [ ] T074 [P] Optimize Docker image (multi-stage) `Dockerfile`  
-- [ ] T075 Add backup & migration script `scripts/backup_db.ps1`  
-- [ ] T076 Final constitution compliance verification `specs/001-telegram-marketplace/tasks.md`  
+- [x] T072 [P] Add README section for deployment & env hardening `README.md`  
+- [x] T073 Add security review checklist `docs/security-checklist.md`  
+- [x] T074 [P] Optimize Docker image (multi-stage) `Dockerfile`  
+- [x] T075 Add backup & migration script `scripts/backup_db.ps1`  
+- [x] T076 Final constitution compliance verification `specs/001-telegram-marketplace/tasks.md`  
 
 ## Dependency Graph (Stories)
 US1 (posting) → US2 (purchase) → US3 (lifecycle)

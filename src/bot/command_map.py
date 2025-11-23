@@ -7,6 +7,11 @@ from telegram.ext import Application
 
 from src.bot.callback_map import register_callback_handlers
 from src.handlers.discovery.list_offers_handler import get_discovery_handlers
+from src.handlers.lifecycle.offer_pause_handler import (
+    get_pause_handler,
+    get_resume_handler,
+)
+from src.handlers.lifecycle.offer_edit_handler import get_edit_handler
 from src.handlers.offer_posting.business_registration_handler import (
     get_registration_handler,
 )
@@ -64,10 +69,18 @@ def register_handlers(app: Application) -> None:
     app.add_handler(get_cancellation_handler())
     logger.info("handler_registered", handler="purchase_cancel")
 
+    # Lifecycle management handlers (Phase 5)
+    app.add_handler(get_pause_handler())
+    logger.info("handler_registered", handler="offer_pause")
+
+    app.add_handler(get_resume_handler())
+    logger.info("handler_registered", handler="offer_resume")
+
+    app.add_handler(get_edit_handler())
+    logger.info("handler_registered", handler="offer_edit")
+
     # Callback query handlers for inline buttons
     register_callback_handlers(app)
     logger.info("handler_registered", handler="callbacks")
 
-    # TODO: Add Phase 5 handlers (lifecycle management)
-
-    logger.info("all_handlers_registered", total=7)
+    logger.info("all_handlers_registered", total=10)

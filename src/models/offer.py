@@ -50,6 +50,11 @@ class Offer(BaseModel):
             raise ValueError("end_time must be after start_time")
         return v
 
+    @property
+    def is_expired(self) -> bool:
+        """Check if offer has expired based on end_time."""
+        return datetime.utcnow() >= self.end_time
+
 
 class OfferInput(BaseModel):
     """Input model for offer creation."""

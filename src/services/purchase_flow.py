@@ -117,7 +117,7 @@ class PurchaseFlowService:
 
                     purchase_items.append(
                         PurchaseItem(
-                            item_name=item_info["item_name"],
+                            name=item_info["name"],
                             quantity=item_info["quantity"],
                             unit_price=item_info["unit_price"],
                         )
