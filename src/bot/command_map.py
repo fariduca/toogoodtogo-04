@@ -24,9 +24,11 @@ from src.handlers.offer_posting.business_registration_handler import (
 from src.handlers.offer_posting.business_verify_handler import (
     get_verification_handlers,
 )
-from src.handlers.offer_posting.offer_draft_handler import get_offer_draft_handler
+# TODO: Migrate offer_draft_handler to new quantity-based offer system (no Item model)
+# from src.handlers.offer_posting.offer_draft_handler import get_offer_draft_handler
 from src.handlers.offer_posting.offer_publish_handler import get_publish_handler
-from src.handlers.purchasing.purchase_cancel_handler import get_cancellation_handler
+# TODO: Migrate purchase_cancel_handler to use reservation system
+# from src.handlers.purchasing.purchase_cancel_handler import get_cancellation_handler
 from src.handlers.purchasing.reserve_handler import get_reservation_handlers
 from src.handlers.system.start_handler import (
     get_default_message_handler,
@@ -70,9 +72,10 @@ def register_handlers(app: Application) -> None:
         app.add_handler(handler)
     logger.info("handler_registered", handler="business_verification")
 
-    # Offer creation flow (conversation)
-    app.add_handler(get_offer_draft_handler())
-    logger.info("handler_registered", handler="offer_draft_conversation")
+    # TODO: Re-implement offer draft handler for new quantity-based system
+    # Offer creation flow (conversation) - DEPRECATED
+    # app.add_handler(get_offer_draft_handler())
+    # logger.info("handler_registered", handler="offer_draft_conversation")
 
     # Offer publish command
     app.add_handler(get_publish_handler())
@@ -93,9 +96,10 @@ def register_handlers(app: Application) -> None:
         app.add_handler(handler)
     logger.info("handler_registered", handler="old_discovery")
 
-    # Purchase cancellation
-    app.add_handler(get_cancellation_handler())
-    logger.info("handler_registered", handler="purchase_cancel")
+    # TODO: Implement reservation cancellation handler
+    # Purchase cancellation (deprecated - needs migration to reservation system)
+    # app.add_handler(get_cancellation_handler())
+    # logger.info("handler_registered", handler="purchase_cancel")
 
     # Lifecycle management handlers (Phase 5)
     app.add_handler(get_pause_handler())

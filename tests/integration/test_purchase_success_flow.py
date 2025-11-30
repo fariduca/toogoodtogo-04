@@ -1,10 +1,10 @@
-"""Integration test for successful purchase flow.
+"""Integration test for successful reservation flow.
 
-Tests end-to-end purchase with inventory management:
+Tests end-to-end reservation with inventory management:
 1. List active offers
-2. Select offer and items
+2. Select offer and quantity
 3. Reserve inventory with lock
-4. Confirm purchase (cash)
+4. Confirm reservation (on-site payment)
 5. Verify inventory updated
 """
 
@@ -13,18 +13,18 @@ from decimal import Decimal
 import pytest
 import random
 
-from src.models.offer import OfferInput, OfferStatus, Item
+from src.models.offer import OfferInput, OfferStatus
 from src.models.business import BusinessInput, VerificationStatus, Venue
-from src.models.purchase import PurchaseInput, PurchaseStatus, PurchaseItem
+from src.models.reservation import ReservationInput, ReservationStatus
 from src.storage.postgres_offer_repo import PostgresOfferRepository
 from src.storage.postgres_business_repo import PostgresBusinessRepository
-from src.storage.postgres_purchase_repo import PostgresPurchaseRepository
+from src.storage.postgres_reservation_repo import PostgresReservationRepository
 from src.storage.database import get_database
 
 
 @pytest.mark.asyncio
-async def test_complete_purchase_flow():
-    """Test complete purchase flow from browsing to confirmation."""
+async def test_complete_reservation_flow():
+    """Test complete reservation flow from browsing to confirmation."""
     db = get_database()
     await db.connect()
     
@@ -33,56 +33,51 @@ async def test_complete_purchase_flow():
             # 1. Create business and active offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Flow Test Restaurant",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="321 Flow St", latitude=40.7306, longitude=-73.9352),
+                business_name="Flow Test Restaurant",
+                owner_id=random.randint(100000, 999999),
+                street_address="321 Flow St",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7306,
+                longitude=-73.9352,
             )
             business = await business_repo.create(business_input)
             
             offer_repo = PostgresOfferRepository(session)
             offer_input = OfferInput(
                 business_id=business.id,
-                title="Purchase Flow Test",
-                items=[
-                    Item(name="Sandwich", quantity=5, original_price=Decimal("8.00"), discounted_price=Decimal("4.00")),
-                    Item(name="Coffee", quantity=10, original_price=Decimal("3.50"), discounted_price=Decimal("1.75")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=4),
-                status=OfferStatus.ACTIVE,
+                title="Reservation Flow Test",
+                description="Test offer for reservation flow testing purposes",
+                quantity_total=10,
+                price_per_unit=Decimal("5.00"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=4),
             )
             offer = await offer_repo.create(offer_input)
             
-            # 2. Initiate purchase
-            purchase_repo = PostgresPurchaseRepository(session)
-            purchase_input = PurchaseInput(
+            # 2. Create reservation
+            reservation_repo = PostgresReservationRepository(session)
+            reservation_input = ReservationInput(
                 offer_id=offer.id,
                 customer_id=999888,
-                item_selections=[
-                    PurchaseItem(name="Sandwich", quantity=2, unit_price=Decimal("4.00")),
-                    PurchaseItem(name="Coffee", quantity=1, unit_price=Decimal("1.75")),
-                ],
-                total_amount=Decimal("9.75"),
-                status=PurchaseStatus.CONFIRMED,  # Cash purchase
+                quantity=3,
+                unit_price=Decimal("5.00"),
             )
-            purchase = await purchase_repo.create(purchase_input)
+            reservation = await reservation_repo.create(reservation_input)
             
             # 3. Decrement inventory
-            await offer_repo.decrement_quantity(offer.id, "Sandwich", 2)
-            await offer_repo.decrement_quantity(offer.id, "Coffee", 1)
+            await offer_repo.decrement_quantity(offer.id, 3)
             
-            # 4. Verify purchase created
-            assert purchase.id is not None
-            assert purchase.status == PurchaseStatus.CONFIRMED
-            assert purchase.total_amount == Decimal("9.75")
+            # 4. Verify reservation created
+            assert reservation.id is not None
+            assert reservation.status == ReservationStatus.CONFIRMED
+            assert reservation.total_price == Decimal("15.00")  # 3 * 5.00
             
             # 5. Verify inventory updated
             updated_offer = await offer_repo.get_by_id(offer.id)
-            sandwich_item = next(i for i in updated_offer.items if i.name == "Sandwich")
-            coffee_item = next(i for i in updated_offer.items if i.name == "Coffee")
-            assert sandwich_item.quantity == 3  # 5 - 2
-            assert coffee_item.quantity == 9    # 10 - 1
+            assert updated_offer.quantity_remaining == 7  # 10 - 3
             
             await session.commit()
     finally:
@@ -90,59 +85,59 @@ async def test_complete_purchase_flow():
 
 
 @pytest.mark.asyncio
-async def test_purchase_updates_inventory(mock_db, mock_redis):
-    """Test purchase decrements offer item quantities."""
-    # TODO: Create offer with 10 items
-    # TODO: Purchase 3 items
+async def test_reservation_updates_inventory(mock_db, mock_redis):
+    """Test reservation decrements offer quantities."""
+    # TODO: Create offer with 10 units
+    # TODO: Reserve 3 units
     # TODO: Verify remaining quantity is 7
 
     pytest.skip("Database implementation pending")
 
 
 @pytest.mark.asyncio
-async def test_purchase_prevents_overselling(mock_db, mock_redis):
-    """Test purchase fails if insufficient inventory."""
-    # TODO: Create offer with 5 items
-    # TODO: Attempt to purchase 6 items
-    # TODO: Verify purchase fails with appropriate error
+async def test_reservation_prevents_overselling(mock_db, mock_redis):
+    """Test reservation fails if insufficient inventory."""
+    # TODO: Create offer with 5 units
+    # TODO: Attempt to reserve 6 units
+    # TODO: Verify reservation fails with appropriate error
 
     pytest.skip("Database implementation pending")
 
 
 @pytest.mark.asyncio
-async def test_purchase_requires_active_offer(mock_db):
-    """Test purchase fails for expired or inactive offers."""
+async def test_reservation_requires_active_offer(mock_db):
+    """Test reservation fails for expired or inactive offers."""
     # TODO: Create expired offer
-    # TODO: Attempt purchase
+    # TODO: Attempt reservation
     # TODO: Verify failure
 
     pytest.skip("Database implementation pending")
 
 
 @pytest.mark.asyncio
-async def test_purchase_with_distributed_lock(mock_redis):
-    """Test purchase acquires distributed lock on offer."""
+async def test_reservation_with_distributed_lock(mock_redis):
+    """Test reservation acquires distributed lock on offer."""
     # TODO: Mock Redis lock helper
-    # TODO: Initiate purchase
+    # TODO: Initiate reservation
     # TODO: Verify lock acquired and released
 
     pytest.skip("Redis mocking needed")
 
 
 @pytest.mark.asyncio
-async def test_purchase_calculates_correct_total(mock_db):
-    """Test purchase total matches item prices."""
-    # TODO: Create offer with known item prices
-    # TODO: Purchase specific items
-    # TODO: Verify total_amount = sum(quantity * unit_price)
+async def test_reservation_calculates_correct_total(mock_db):
+    """Test reservation total matches quantity and unit price."""
+    # TODO: Create offer with known unit price
+    # TODO: Reserve specific quantity
+    # TODO: Verify total_price = quantity * unit_price
 
     pytest.skip("Database implementation pending")
 
 
 @pytest.mark.asyncio
-async def test_cash_purchase_immediate_confirmation(mock_db):
-    """Test cash purchases are immediately confirmed."""
-    # TODO: Create purchase with payment_method=CASH
-    # TODO: Verify status is CONFIRMED (not PENDING)
+async def test_reservation_immediate_confirmation(mock_db):
+    """Test reservations are immediately confirmed."""
+    # TODO: Create reservation
+    # TODO: Verify status is CONFIRMED (customer pays on-site)
 
     pytest.skip("Database implementation pending")

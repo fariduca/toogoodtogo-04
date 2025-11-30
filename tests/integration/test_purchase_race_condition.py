@@ -1,6 +1,6 @@
-"""Integration test for purchase race condition prevention.
+"""Integration test for reservation race condition prevention.
 
-Tests that concurrent purchase attempts are properly serialized
+Tests that concurrent reservation attempts are properly serialized
 using distributed locks to prevent overselling.
 """
 
@@ -10,22 +10,20 @@ from decimal import Decimal
 import pytest
 import random
 
-from src.models.offer import OfferInput, OfferStatus, Item
-from src.models.business import BusinessInput, VerificationStatus, Venue
-from src.models.purchase import PurchaseRequest
-from src.services.purchase_flow import PurchaseFlowService
-from src.services.inventory_reservation import InventoryReservation
+from src.models.offer import OfferInput
+from src.models.business import BusinessInput
+from src.services.reservation_flow import ReservationFlowService
 from src.storage.postgres_offer_repo import PostgresOfferRepository
 from src.storage.postgres_business_repo import PostgresBusinessRepository
-from src.storage.postgres_purchase_repo import PostgresPurchaseRepository
+from src.storage.postgres_reservation_repo import PostgresReservationRepository
 from src.storage.redis_locks import RedisLockHelper
 from src.storage.database import get_database
 from src.config.settings import load_settings
 
 
 @pytest.mark.asyncio
-async def test_concurrent_purchase_prevents_overselling():
-    """Test that concurrent purchases don't oversell limited inventory."""
+async def test_concurrent_reservation_prevents_overselling():
+    """Test that concurrent reservations don't oversell limited inventory."""
     db = get_database()
     await db.connect()
     
@@ -34,10 +32,14 @@ async def test_concurrent_purchase_prevents_overselling():
             # 1. Create business and offer with limited inventory
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Race Test Restaurant",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="789 Race St", latitude=40.7480, longitude=-73.9862),
+                business_name="Race Test Restaurant",
+                owner_id=random.randint(100000, 999999),
+                street_address="789 Race St",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7480,
+                longitude=-73.9862,
             )
             business = await business_repo.create(business_input)
             
@@ -45,69 +47,61 @@ async def test_concurrent_purchase_prevents_overselling():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Limited Stock Test",
-                items=[
-                    Item(name="Bagel", quantity=5, original_price=Decimal("3.00"), discounted_price=Decimal("1.50")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=2),
-                status=OfferStatus.ACTIVE,
+                description="Test offer with limited inventory for race condition testing",
+                quantity_total=5,
+                price_per_unit=Decimal("1.50"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=2),
             )
             offer = await offer_repo.create(offer_input)
             await session.commit()
             
-        # 2. Initialize purchase services
+        # 2. Initialize reservation services
         settings = load_settings()
         lock_helper = RedisLockHelper(redis_url=settings.redis_url)
         await lock_helper.connect()
         
-        async def attempt_purchase(customer_id: int, quantity: int):
-            """Simulate purchase attempt."""
+        async def attempt_reservation(customer_id: int, quantity: int):
+            """Simulate reservation attempt."""
             async with db.session() as session:
                 offer_repo = PostgresOfferRepository(session)
-                purchase_repo = PostgresPurchaseRepository(session)
-                inventory_service = InventoryReservation(offer_repo, lock_helper)
-                purchase_service = PurchaseFlowService(
+                reservation_repo = PostgresReservationRepository(session)
+                reservation_service = ReservationFlowService(
                     offer_repo,
-                    purchase_repo,
-                    inventory_service,
+                    reservation_repo,
+                    lock_helper,
                 )
                 
-                purchase_request = PurchaseRequest(
-                    items=[{"item_name": "Bagel", "quantity": quantity}]
-                )
-                
-                result = await purchase_service.create_purchase(
-                    offer.id,
-                    customer_id,
-                    purchase_request,
-                    payment_method="CASH",
+                result = await reservation_service.create_reservation(
+                    customer_id=customer_id,
+                    offer_id=offer.id,
+                    quantity=quantity,
                 )
                 await session.commit()
                 return result
         
-        # 3. Simulate 3 concurrent purchases of 2 items each (total demand = 6, supply = 5)
+        # 3. Simulate 3 concurrent reservations of 2 units each (total demand = 6, supply = 5)
         tasks = [
-            attempt_purchase(customer_id=1000 + i, quantity=2)
+            attempt_reservation(customer_id=1000 + i, quantity=2)
             for i in range(3)
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # 4. Verify: Only 2 purchases should succeed (2 * 2 = 4 items), 1 should fail
-        successful = [r for r in results if not isinstance(r, Exception) and getattr(r, 'success', False)]
-        failed = [r for r in results if isinstance(r, Exception) or not getattr(r, 'success', False)]
+        # 4. Verify: Only 2 reservations should succeed (2 * 2 = 4 units), 1 should fail
+        successful = [r for r in results if not isinstance(r, Exception) and r[0]]
+        failed = [r for r in results if isinstance(r, Exception) or not r[0]]
         
-        assert len(successful) == 2, f"Expected 2 successful purchases, got {len(successful)}"
-        assert len(failed) == 1, f"Expected 1 failed purchase, got {len(failed)}"
+        assert len(successful) == 2, f"Expected 2 successful reservations, got {len(successful)}"
+        assert len(failed) == 1, f"Expected 1 failed reservation, got {len(failed)}"
         
         # 5. Verify final inventory (should be 1 remaining)
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
             final_offer = await offer_repo.get_by_id(offer.id)
             assert final_offer is not None, "Offer should exist"
-            bagel_item = next(i for i in final_offer.items if i.name == "Bagel")
-            
-            assert bagel_item.quantity == 1, f"Expected 1 remaining, got {bagel_item.quantity}"
+            assert final_offer.quantity_remaining == 1, f"Expected 1 remaining, got {final_offer.quantity_remaining}"
         
     finally:
         await db.disconnect()
@@ -121,13 +115,17 @@ async def test_lock_prevents_simultaneous_reservation():
     
     try:
         async with db.session() as session:
-            # Setup: Create offer with 3 items
+            # Setup: Create offer with 3 units
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Lock Test Shop",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="456 Lock Ave", latitude=40.7580, longitude=-73.9700),
+                business_name="Lock Test Shop",
+                owner_id=random.randint(100000, 999999),
+                street_address="456 Lock Ave",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7580,
+                longitude=-73.9700,
             )
             business = await business_repo.create(business_input)
             
@@ -135,12 +133,12 @@ async def test_lock_prevents_simultaneous_reservation():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Lock Test Offer",
-                items=[
-                    Item(name="Cookie", quantity=3, original_price=Decimal("2.00"), discounted_price=Decimal("1.00")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=1),
-                status=OfferStatus.ACTIVE,
+                description="Test offer for distributed lock testing purposes",
+                quantity_total=3,
+                price_per_unit=Decimal("1.00"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=1),
             )
             offer = await offer_repo.create(offer_input)
             await session.commit()
@@ -149,41 +147,48 @@ async def test_lock_prevents_simultaneous_reservation():
         lock_helper = RedisLockHelper(redis_url=settings.redis_url)
         await lock_helper.connect()
         
-        async def purchase_with_delay(customer_id: int):
-            """Purchase with artificial delay to test lock behavior."""
+        async def reserve_with_delay(customer_id: int):
+            """Reserve with artificial delay to test lock behavior."""
             async with db.session() as session:
                 offer_repo = PostgresOfferRepository(session)
-                purchase_repo = PostgresPurchaseRepository(session)
-                inventory_service = InventoryReservation(offer_repo, lock_helper)
+                reservation_repo = PostgresReservationRepository(session)
+                reservation_service = ReservationFlowService(
+                    offer_repo,
+                    reservation_repo,
+                    lock_helper,
+                )
                 
-                # Try to reserve 2 items
-                item_requests = [{"item_name": "Cookie", "quantity": 2}]
+                # Try to reserve 2 units with delay
+                result = await reservation_service.create_reservation(
+                    customer_id=customer_id,
+                    offer_id=offer.id,
+                    quantity=2,
+                )
                 
-                async with inventory_service.reserve_items(offer.id, item_requests) as reservation:
-                    if reservation["success"]:
-                        # Add delay to keep lock held
-                        await asyncio.sleep(0.1)
-                    
-                    await session.commit()
-                    return reservation["success"]
+                if result[0]:  # success
+                    # Add delay to keep lock held
+                    await asyncio.sleep(0.1)
+                
+                await session.commit()
+                return result[0]  # return success boolean
         
-        # Launch 2 concurrent purchases (both want 2 items, only 3 available)
-        task1 = asyncio.create_task(purchase_with_delay(2001))
-        task2 = asyncio.create_task(purchase_with_delay(2002))
+        # Launch 2 concurrent reservations (both want 2 units, only 3 available)
+        task1 = asyncio.create_task(reserve_with_delay(2001))
+        task2 = asyncio.create_task(reserve_with_delay(2002))
         
         result1, result2 = await asyncio.gather(task1, task2)
         
         # One should succeed, one should fail (or wait for lock)
-        assert result1 != result2, "Both purchases should not have same outcome"
-        assert result1 or result2, "At least one purchase should succeed"
+        assert result1 != result2, "Both reservations should not have same outcome"
+        assert result1 or result2, "At least one reservation should succeed"
         
     finally:
         await db.disconnect()
 
 
 @pytest.mark.asyncio
-async def test_purchase_after_inventory_depleted():
-    """Test purchase fails gracefully when inventory is depleted."""
+async def test_reservation_after_inventory_depleted():
+    """Test reservation fails gracefully when inventory is depleted."""
     db = get_database()
     await db.connect()
     
@@ -192,10 +197,14 @@ async def test_purchase_after_inventory_depleted():
             # Create business and offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Depleted Test Cafe",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="321 Empty St", latitude=40.7280, longitude=-73.9500),
+                business_name="Depleted Test Cafe",
+                owner_id=random.randint(100000, 999999),
+                street_address="321 Empty St",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7280,
+                longitude=-73.9500,
             )
             business = await business_repo.create(business_input)
             
@@ -203,48 +212,42 @@ async def test_purchase_after_inventory_depleted():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Sold Out Test",
-                items=[
-                    Item(name="Muffin", quantity=1, original_price=Decimal("4.00"), discounted_price=Decimal("2.00")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=3),
-                status=OfferStatus.ACTIVE,
+                description="Test offer for depleted inventory testing",
+                quantity_total=1,
+                price_per_unit=Decimal("2.00"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=3),
             )
             offer = await offer_repo.create(offer_input)
             
             # Deplete inventory manually
-            await offer_repo.decrement_quantity(offer.id, "Muffin", 1)
+            await offer_repo.decrement_quantity(offer.id, 1)
             await session.commit()
         
-        # Try to purchase when inventory is 0
+        # Try to reserve when inventory is 0
         settings = load_settings()
         lock_helper = RedisLockHelper(redis_url=settings.redis_url)
         await lock_helper.connect()
         
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            purchase_repo = PostgresPurchaseRepository(session)
-            inventory_service = InventoryReservation(offer_repo, lock_helper)
-            purchase_service = PurchaseFlowService(
+            reservation_repo = PostgresReservationRepository(session)
+            reservation_service = ReservationFlowService(
                 offer_repo,
-                purchase_repo,
-                inventory_service,
+                reservation_repo,
+                lock_helper,
             )
             
-            purchase_request = PurchaseRequest(
-                items=[{"item_name": "Muffin", "quantity": 1}]
-            )
-            
-            result = await purchase_service.create_purchase(
-                offer.id,
+            result = await reservation_service.create_reservation(
                 customer_id=3000,
-                purchase_request=purchase_request,
-                payment_method="CASH",
+                offer_id=offer.id,
+                quantity=1,
             )
             
-            # Purchase should fail
-            assert not result.success, "Purchase should fail when inventory depleted"
-            assert result.error is not None and ("Insufficient quantity" in result.error or "quantity" in result.error.lower())
+            # Reservation should fail
+            assert not result[0], "Reservation should fail when inventory depleted"
+            assert result[1] is not None and ("available" in result[1].lower() or "units" in result[1].lower())
         
     finally:
         await db.disconnect()

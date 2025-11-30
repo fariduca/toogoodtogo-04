@@ -1,7 +1,7 @@
 """Integration test for offer pause/resume flow.
 
 Tests the ability to pause and resume offers, verifying
-that paused offers prevent new purchases while remaining visible.
+that paused offers prevent new reservations while remaining visible.
 """
 
 from datetime import datetime, timedelta
@@ -9,22 +9,20 @@ from decimal import Decimal
 import pytest
 import random
 
-from src.models.offer import OfferInput, OfferStatus, Item
-from src.models.business import BusinessInput, VerificationStatus, Venue
-from src.models.purchase import PurchaseRequest
-from src.services.purchase_flow import PurchaseFlowService
-from src.services.inventory_reservation import InventoryReservation
+from src.models.offer import OfferInput, OfferStatus
+from src.models.business import BusinessInput
+from src.services.reservation_flow import ReservationFlowService
 from src.storage.postgres_offer_repo import PostgresOfferRepository
 from src.storage.postgres_business_repo import PostgresBusinessRepository
-from src.storage.postgres_purchase_repo import PostgresPurchaseRepository
+from src.storage.postgres_reservation_repo import PostgresReservationRepository
 from src.storage.redis_locks import RedisLockHelper
 from src.storage.database import get_database
 from src.config.settings import load_settings
 
 
 @pytest.mark.asyncio
-async def test_pause_offer_prevents_purchases():
-    """Test that pausing an offer prevents new purchases."""
+async def test_pause_offer_prevents_reservations():
+    """Test that pausing an offer prevents new reservations."""
     db = get_database()
     await db.connect()
     
@@ -33,10 +31,14 @@ async def test_pause_offer_prevents_purchases():
             # 1. Create business and active offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Pause Test Cafe",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="456 Pause St", latitude=40.7450, longitude=-73.9800),
+                business_name="Pause Test Cafe",
+                owner_id=random.randint(100000, 999999),
+                street_address="456 Pause St",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7450,
+                longitude=-73.9800,
             )
             business = await business_repo.create(business_input)
             
@@ -44,67 +46,61 @@ async def test_pause_offer_prevents_purchases():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Pause Test Offer",
-                items=[
-                    Item(name="Donut", quantity=10, original_price=Decimal("2.50"), discounted_price=Decimal("1.25")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=3),
-                status=OfferStatus.ACTIVE,
+                description="Test offer for pause functionality testing",
+                quantity_total=10,
+                price_per_unit=Decimal("1.25"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=3),
             )
             offer = await offer_repo.create(offer_input)
             await session.commit()
         
-        # 2. Verify purchase works when active
+        # 2. Verify reservation works when active
         settings = load_settings()
         lock_helper = RedisLockHelper(redis_url=settings.redis_url)
         await lock_helper.connect()
         
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            purchase_repo = PostgresPurchaseRepository(session)
-            inventory_service = InventoryReservation(offer_repo, lock_helper)
-            purchase_service = PurchaseFlowService(
+            reservation_repo = PostgresReservationRepository(session)
+            reservation_service = ReservationFlowService(
                 offer_repo,
-                purchase_repo,
-                inventory_service,
+                reservation_repo,
+                lock_helper,
             )
             
-            purchase_request = PurchaseRequest(
-                items=[{"item_name": "Donut", "quantity": 2}]
-            )
-            
-            result = await purchase_service.create_purchase(
-                offer.id,
+            result = await reservation_service.create_reservation(
                 customer_id=5001,
-                purchase_request=purchase_request,
-                payment_method="CASH",
+                offer_id=offer.id,
+                quantity=2,
             )
             await session.commit()
             
-            assert result.success, "Purchase should succeed when offer is active"
+            assert result[0], "Reservation should succeed when offer is active"
         
         # 3. Pause the offer
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            await offer_repo.update_status(offer.id, OfferStatus.PAUSED)
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             await session.commit()
         
-        # 4. Verify purchase is blocked when paused
-        # Note: Current implementation may not check status in purchase flow
+        # 4. Verify reservation is blocked when paused
+        # Note: Current implementation may not check state in reservation flow
         # This test documents expected behavior
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
             paused_offer = await offer_repo.get_by_id(offer.id)
             
-            assert paused_offer.status == OfferStatus.PAUSED
+            assert paused_offer.state == OfferStatus.PAUSED
         
     finally:
         await db.disconnect()
 
 
 @pytest.mark.asyncio
-async def test_resume_offer_allows_purchases():
-    """Test that resuming a paused offer allows purchases again."""
+async def test_resume_offer_allows_reservations():
+    """Test that resuming a paused offer allows reservations again."""
     db = get_database()
     await db.connect()
     
@@ -113,10 +109,14 @@ async def test_resume_offer_allows_purchases():
             # 1. Create business and paused offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Resume Test Shop",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="789 Resume Ave", latitude=40.7550, longitude=-73.9650),
+                business_name="Resume Test Shop",
+                owner_id=random.randint(100000, 999999),
+                street_address="789 Resume Ave",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7550,
+                longitude=-73.9650,
             )
             business = await business_repo.create(business_input)
             
@@ -124,50 +124,47 @@ async def test_resume_offer_allows_purchases():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Resume Test Offer",
-                items=[
-                    Item(name="Cake", quantity=5, original_price=Decimal("10.00"), discounted_price=Decimal("5.00")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=4),
-                status=OfferStatus.PAUSED,  # Start paused
+                description="Test offer for resume functionality testing",
+                quantity_total=5,
+                price_per_unit=Decimal("5.00"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=4),
             )
             offer = await offer_repo.create(offer_input)
+            
+            # Pause it immediately
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             await session.commit()
         
         # 2. Resume the offer
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            await offer_repo.update_status(offer.id, OfferStatus.ACTIVE)
+            await offer_repo.update_state(offer.id, OfferStatus.ACTIVE)
             await session.commit()
         
-        # 3. Verify purchase works after resume
+        # 3. Verify reservation works after resume
         settings = load_settings()
         lock_helper = RedisLockHelper(redis_url=settings.redis_url)
         await lock_helper.connect()
         
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            purchase_repo = PostgresPurchaseRepository(session)
-            inventory_service = InventoryReservation(offer_repo, lock_helper)
-            purchase_service = PurchaseFlowService(
+            reservation_repo = PostgresReservationRepository(session)
+            reservation_service = ReservationFlowService(
                 offer_repo,
-                purchase_repo,
-                inventory_service,
+                reservation_repo,
+                lock_helper,
             )
             
-            purchase_request = PurchaseRequest(
-                items=[{"item_name": "Cake", "quantity": 1}]
-            )
-            
-            result = await purchase_service.create_purchase(
-                offer.id,
+            result = await reservation_service.create_reservation(
                 customer_id=5002,
-                purchase_request=purchase_request,
-                payment_method="CASH",
+                offer_id=offer.id,
+                quantity=1,
             )
             await session.commit()
             
-            assert result.success, "Purchase should succeed after resume"
+            assert result[0], "Reservation should succeed after resume"
         
     finally:
         await db.disconnect()
@@ -184,10 +181,14 @@ async def test_pause_preserves_inventory():
             # Create offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Inventory Test",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="321 Inventory Rd", latitude=40.7350, longitude=-73.9750),
+                business_name="Inventory Test",
+                owner_id=random.randint(100000, 999999),
+                street_address="321 Inventory Rd",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7350,
+                longitude=-73.9750,
             )
             business = await business_repo.create(business_input)
             
@@ -195,21 +196,21 @@ async def test_pause_preserves_inventory():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Inventory Preservation Test",
-                items=[
-                    Item(name="Cookie", quantity=20, original_price=Decimal("1.50"), discounted_price=Decimal("0.75")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=2),
-                status=OfferStatus.ACTIVE,
+                description="Test offer for inventory preservation during pause",
+                quantity_total=20,
+                price_per_unit=Decimal("0.75"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=2),
             )
             offer = await offer_repo.create(offer_input)
-            initial_quantity = offer.items[0].quantity
+            initial_quantity = offer.quantity_remaining
             await session.commit()
         
         # Pause offer
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
-            await offer_repo.update_status(offer.id, OfferStatus.PAUSED)
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             await session.commit()
         
         # Check inventory unchanged
@@ -217,8 +218,8 @@ async def test_pause_preserves_inventory():
             offer_repo = PostgresOfferRepository(session)
             paused_offer = await offer_repo.get_by_id(offer.id)
             
-            assert paused_offer.items[0].quantity == initial_quantity
-            assert paused_offer.status == OfferStatus.PAUSED
+            assert paused_offer.quantity_remaining == initial_quantity
+            assert paused_offer.state == OfferStatus.PAUSED
         
     finally:
         await db.disconnect()
@@ -235,10 +236,14 @@ async def test_cannot_resume_expired_offer():
             # Create expired paused offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Expired Test",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="654 Expired Ln", latitude=40.7250, longitude=-73.9850),
+                business_name="Expired Test",
+                owner_id=random.randint(100000, 999999),
+                street_address="654 Expired Ln",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7250,
+                longitude=-73.9850,
             )
             business = await business_repo.create(business_input)
             
@@ -246,14 +251,15 @@ async def test_cannot_resume_expired_offer():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Expired Offer",
-                items=[
-                    Item(name="Bread", quantity=10, original_price=Decimal("4.00"), discounted_price=Decimal("2.00")),
-                ],
-                start_time=datetime.utcnow() - timedelta(hours=3),
-                end_time=datetime.utcnow() - timedelta(hours=1),  # Already expired
-                status=OfferStatus.PAUSED,
+                description="Test offer that is already expired",
+                quantity_total=10,
+                price_per_unit=Decimal("2.00"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow() - timedelta(hours=3),
+                pickup_end_time=datetime.utcnow() - timedelta(hours=1),  # Already expired
             )
             offer = await offer_repo.create(offer_input)
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             await session.commit()
         
         # Verify offer is expired
@@ -281,10 +287,14 @@ async def test_pause_resume_cycle():
             # Create offer
             business_repo = PostgresBusinessRepository(session)
             business_input = BusinessInput(
-                name="Cycle Test",
-                telegram_id=random.randint(100000, 999999),
-                verification_status=VerificationStatus.APPROVED,
-                venue=Venue(address="987 Cycle Blvd", latitude=40.7650, longitude=-73.9550),
+                business_name="Cycle Test",
+                owner_id=random.randint(100000, 999999),
+                street_address="987 Cycle Blvd",
+                city="Helsinki",
+                postal_code="00100",
+                country_code="FI",
+                latitude=40.7650,
+                longitude=-73.9550,
             )
             business = await business_repo.create(business_input)
             
@@ -292,12 +302,12 @@ async def test_pause_resume_cycle():
             offer_input = OfferInput(
                 business_id=business.id,
                 title="Cycle Test Offer",
-                items=[
-                    Item(name="Muffin", quantity=15, original_price=Decimal("3.00"), discounted_price=Decimal("1.50")),
-                ],
-                start_time=datetime.utcnow(),
-                end_time=datetime.utcnow() + timedelta(hours=5),
-                status=OfferStatus.ACTIVE,
+                description="Test offer for pause/resume cycle testing",
+                quantity_total=15,
+                price_per_unit=Decimal("1.50"),
+                currency="EUR",
+                pickup_start_time=datetime.utcnow(),
+                pickup_end_time=datetime.utcnow() + timedelta(hours=5),
             )
             offer = await offer_repo.create(offer_input)
             await session.commit()
@@ -307,14 +317,14 @@ async def test_pause_resume_cycle():
             offer_repo = PostgresOfferRepository(session)
             
             # Pause
-            await offer_repo.update_status(offer.id, OfferStatus.PAUSED)
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             paused = await offer_repo.get_by_id(offer.id)
-            assert paused.status == OfferStatus.PAUSED
+            assert paused.state == OfferStatus.PAUSED
             
             # Resume
-            await offer_repo.update_status(offer.id, OfferStatus.ACTIVE)
+            await offer_repo.update_state(offer.id, OfferStatus.ACTIVE)
             resumed = await offer_repo.get_by_id(offer.id)
-            assert resumed.status == OfferStatus.ACTIVE
+            assert resumed.state == OfferStatus.ACTIVE
             
             await session.commit()
         
@@ -322,9 +332,9 @@ async def test_pause_resume_cycle():
         async with db.session() as session:
             offer_repo = PostgresOfferRepository(session)
             
-            await offer_repo.update_status(offer.id, OfferStatus.PAUSED)
+            await offer_repo.update_state(offer.id, OfferStatus.PAUSED)
             paused_again = await offer_repo.get_by_id(offer.id)
-            assert paused_again.status == OfferStatus.PAUSED
+            assert paused_again.state == OfferStatus.PAUSED
             
             await session.commit()
         
