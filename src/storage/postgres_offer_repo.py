@@ -6,10 +6,9 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import flag_modified
 
 from src.logging import get_logger
-from src.models.offer import Offer, OfferInput, OfferStatus, Item
+from src.models.offer import Offer, OfferInput, OfferStatus
 from src.storage.db_models import OfferTable
 from src.storage.repository_base import RepositoryBase
 
@@ -39,19 +38,17 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         db_offer = OfferTable(
             business_id=entity.business_id,
             title=entity.title,
-            items=[
-                {
-                    "name": item.name,
-                    "quantity": item.quantity,
-                    "original_price": float(item.original_price),
-                    "discounted_price": float(item.discounted_price),
-                }
-                for item in entity.items
-            ],
-            start_time=entity.start_time,
-            end_time=entity.end_time,
-            status=entity.status,
-            image_url=getattr(entity, 'image_url', None),
+            description=entity.description,
+            photo_url=entity.photo_url,
+            category=entity.category,
+            price_per_unit=entity.price_per_unit,
+            currency=entity.currency,
+            quantity_total=entity.quantity_total,
+            quantity_remaining=entity.quantity_total,
+            pickup_start_time=entity.pickup_start_time,
+            pickup_end_time=entity.pickup_end_time,
+            state=OfferStatus.ACTIVE,
+            published_at=datetime.utcnow(),
         )
 
         self.session.add(db_offer)
@@ -71,20 +68,15 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
             raise ValueError(f"Offer not found: {entity.id}")
 
         db_offer.title = entity.title
-        db_offer.items = [
-            {
-                "name": item.name,
-                "quantity": item.quantity,
-                "original_price": float(item.original_price),
-                "discounted_price": float(item.discounted_price),
-            }
-            for item in entity.items
-        ]
-        db_offer.start_time = entity.start_time
-        db_offer.end_time = entity.end_time
-        db_offer.status = entity.status
-        if hasattr(entity, 'image_url'):
-            db_offer.image_url = entity.image_url
+        db_offer.description = entity.description
+        db_offer.photo_url = entity.photo_url
+        db_offer.category = entity.category
+        db_offer.price_per_unit = entity.price_per_unit
+        db_offer.quantity_total = entity.quantity_total
+        db_offer.quantity_remaining = entity.quantity_remaining
+        db_offer.pickup_start_time = entity.pickup_start_time
+        db_offer.pickup_end_time = entity.pickup_end_time
+        db_offer.state = entity.state
 
         await self.session.flush()
 
@@ -112,8 +104,9 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         """Get active offers ordered by creation time."""
         stmt = (
             select(OfferTable)
-            .where(OfferTable.status == OfferStatus.ACTIVE)
-            .where(OfferTable.end_time > datetime.utcnow())
+            .where(OfferTable.state == OfferStatus.ACTIVE)
+            .where(OfferTable.pickup_end_time > datetime.utcnow())
+            .where(OfferTable.quantity_remaining > 0)
             .order_by(OfferTable.created_at.desc())
             .limit(limit)
         )
@@ -123,19 +116,19 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         return [self._to_domain_model(db_offer) for db_offer in db_offers]
 
     async def get_expired_offers(self) -> list[Offer]:
-        """Get offers past end_time with active status."""
+        """Get offers past pickup_end_time with active status."""
         stmt = (
             select(OfferTable)
-            .where(OfferTable.status == OfferStatus.ACTIVE)
-            .where(OfferTable.end_time <= datetime.utcnow())
+            .where(OfferTable.state == OfferStatus.ACTIVE)
+            .where(OfferTable.pickup_end_time <= datetime.utcnow())
         )
         result = await self.session.execute(stmt)
         db_offers = result.scalars().all()
 
         return [self._to_domain_model(db_offer) for db_offer in db_offers]
 
-    async def update_status(self, id: UUID, status: OfferStatus) -> Offer:
-        """Update offer status."""
+    async def update_state(self, id: UUID, state: OfferStatus) -> Offer:
+        """Update offer state."""
         stmt = select(OfferTable).where(OfferTable.id == id)
         result = await self.session.execute(stmt)
         db_offer = result.scalar_one_or_none()
@@ -143,17 +136,15 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         if not db_offer:
             raise ValueError(f"Offer not found: {id}")
 
-        db_offer.status = status
+        db_offer.state = state
         await self.session.flush()
 
-        logger.info("offer_status_updated", offer_id=str(id), status=status.value)
+        logger.info("offer_state_updated", offer_id=str(id), state=state.value)
 
         return self._to_domain_model(db_offer)
 
-    async def decrement_quantity(
-        self, id: UUID, item_name: str, quantity: int
-    ) -> bool:
-        """Atomically decrement item quantity."""
+    async def decrement_quantity(self, id: UUID, quantity: int) -> bool:
+        """Atomically decrement quantity_remaining."""
         stmt = select(OfferTable).where(OfferTable.id == id)
         result = await self.session.execute(stmt)
         db_offer = result.scalar_one_or_none()
@@ -161,37 +152,57 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         if not db_offer:
             return False
 
-        # Find the item in the items JSON array
-        items = db_offer.items
-        item_found = False
-        for item in items:
-            if item["name"] == item_name:
-                if item["quantity"] < quantity:
-                    logger.warning(
-                        "insufficient_quantity",
-                        offer_id=str(id),
-                        item_name=item_name,
-                        available=item["quantity"],
-                        requested=quantity,
-                    )
-                    return False
-                item["quantity"] -= quantity
-                item_found = True
-                break
-
-        if not item_found:
-            logger.warning("item_not_found", offer_id=str(id), item_name=item_name)
+        if db_offer.quantity_remaining < quantity:
+            logger.warning(
+                "insufficient_quantity",
+                offer_id=str(id),
+                available=db_offer.quantity_remaining,
+                requested=quantity,
+            )
             return False
 
-        # Mark JSON column as modified and update
-        flag_modified(db_offer, "items")
+        db_offer.quantity_remaining -= quantity
+
+        # Auto-transition to SOLD_OUT if quantity reaches 0
+        if db_offer.quantity_remaining == 0:
+            db_offer.state = OfferStatus.SOLD_OUT
+            logger.info("offer_sold_out", offer_id=str(id))
+
         await self.session.flush()
 
         logger.info(
             "quantity_decremented",
             offer_id=str(id),
-            item_name=item_name,
             quantity_removed=quantity,
+            remaining=db_offer.quantity_remaining,
+        )
+
+        return True
+
+    async def increment_quantity(self, id: UUID, quantity: int) -> bool:
+        """Increment quantity_remaining (for cancellations)."""
+        stmt = select(OfferTable).where(OfferTable.id == id)
+        result = await self.session.execute(stmt)
+        db_offer = result.scalar_one_or_none()
+
+        if not db_offer:
+            return False
+
+        db_offer.quantity_remaining += quantity
+
+        # If was SOLD_OUT and now has inventory, revert to ACTIVE
+        if db_offer.state == OfferStatus.SOLD_OUT and db_offer.quantity_remaining > 0:
+            if db_offer.pickup_end_time > datetime.utcnow():
+                db_offer.state = OfferStatus.ACTIVE
+                logger.info("offer_reactivated_from_sold_out", offer_id=str(id))
+
+        await self.session.flush()
+
+        logger.info(
+            "quantity_incremented",
+            offer_id=str(id),
+            quantity_added=quantity,
+            remaining=db_offer.quantity_remaining,
         )
 
         return True
@@ -210,24 +221,21 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
 
     def _to_domain_model(self, db_offer: OfferTable) -> Offer:
         """Convert database model to domain model."""
-        items = [
-            Item(
-                name=item["name"],
-                quantity=item["quantity"],
-                original_price=item["original_price"],
-                discounted_price=item["discounted_price"],
-            )
-            for item in db_offer.items
-        ]
-
         return Offer(
             id=db_offer.id,
             business_id=db_offer.business_id,
             title=db_offer.title,
-            items=items,
-            start_time=db_offer.start_time,
-            end_time=db_offer.end_time,
-            status=db_offer.status,
-            image_url=db_offer.image_url,
+            description=db_offer.description,
+            photo_url=db_offer.photo_url,
+            category=db_offer.category,
+            price_per_unit=db_offer.price_per_unit,
+            currency=db_offer.currency,
+            quantity_total=db_offer.quantity_total,
+            quantity_remaining=db_offer.quantity_remaining,
+            pickup_start_time=db_offer.pickup_start_time,
+            pickup_end_time=db_offer.pickup_end_time,
+            state=db_offer.state,
             created_at=db_offer.created_at,
+            published_at=db_offer.published_at,
+            updated_at=db_offer.updated_at,
         )

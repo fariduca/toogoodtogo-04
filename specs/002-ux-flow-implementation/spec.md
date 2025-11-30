@@ -5,6 +5,19 @@
 **Status**: Draft  
 **Input**: User description: "Implement comprehensive UX flow for Telegram marketplace bot with native features including commands, keyboards, inline buttons, payments, and offer lifecycle management"
 
+## Clarifications
+
+### Session 2025-11-30 (Initial)
+
+- Q: When a customer initiates reservation (FR-015), how should inventory be managed? → A: Reservation immediately decrements inventory (no temporary hold with auto-release)
+- Q: What distance qualifies as "nearby" for the customer browse Nearby filter (FR-010)? → A: 5km (3 miles) radius
+- Q: How frequently should the system check for expired offers (FR-004)? → A: 1 minute intervals
+- Q: What events should be logged for operational monitoring, debugging, and business analytics? → A: Key business events - Offer lifecycle, reservations, cancellations, errors with structured data
+
+### Session 2025-11-30 (Payment Model Update)
+
+- **Payment approach**: On-site payment model selected. Customers reserve items through the bot and pay at pickup (cash, card, or business's preferred method). This simplifies MVP implementation by removing payment provider integration complexity while still enabling the core marketplace value proposition.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Business Posts a Deal (Priority: P1)
@@ -27,27 +40,27 @@ A registered, verified business wants to post an excess-produce deal quickly thr
 
 ---
 
-### User Story 2 - Customer Discovers and Purchases a Deal (Priority: P1)
+### User Story 2 - Customer Discovers and Reserves a Deal (Priority: P1)
 
-A customer wants to quickly browse nearby deals, see clear details including remaining quantity and pickup time, and complete a purchase with a simple payment flow.
+A customer wants to quickly browse nearby deals, see clear details including remaining quantity and pickup time, and reserve items for on-site payment at pickup.
 
-**Why this priority**: This is the demand side of the marketplace - without customer purchases, businesses gain no value from posting deals. The purchase flow must be frictionless to drive conversion.
+**Why this priority**: This is the demand side of the marketplace - without customer reservations, businesses gain no value from posting deals. The reservation flow must be frictionless to drive conversion while keeping payment simple (on-site).
 
-**Independent Test**: A customer can use `/browse` to see active offers, select one, specify quantity, complete payment via Telegram's native payment interface, and receive a confirmation with redemption instructions. This delivers immediate value by enabling food rescue purchases.
+**Independent Test**: A customer can use `/browse` to see active offers, select one, specify quantity, confirm reservation, and receive a confirmation with order ID and pickup instructions indicating payment will be made on-site. This delivers immediate value by enabling food rescue reservations.
 
 **Acceptance Scenarios**:
 
 1. **Given** active offers exist nearby, **When** a customer uses `/browse`, **Then** they see a paginated list of offer cards showing key details (business name, address, price, pickup time, units left) with inline buttons for navigation.
 
-2. **Given** a customer views offer details, **When** they tap the Buy button and select quantity, **Then** the system reserves those units temporarily and presents a payment interface.
+2. **Given** a customer views offer details, **When** they tap the Reserve button and select quantity, **Then** the system reserves those units and shows confirmation prompt "Reserve [X] items for [Total Price]? Payment on-site at pickup."
 
-3. **Given** a customer initiates payment, **When** payment succeeds via Telegram Payments, **Then** the system confirms the purchase, decrements inventory, sends a confirmation message with order ID, pickup address, time window, and redemption instructions.
+3. **Given** a customer confirms reservation, **When** confirmation is processed, **Then** the system creates the reservation, decrements inventory, sends a confirmation message with order ID, pickup address, time window, total amount to pay, and instructions: "Pay [amount] on-site when you pick up."
 
-4. **Given** a customer attempts to buy the last unit, **When** another customer completes purchase of that unit first (race condition), **Then** the first customer sees an error message "That was the last unit and someone just bought it" and the Buy button is disabled.
+4. **Given** a customer attempts to reserve the last unit, **When** another customer completes reservation of that unit first (race condition), **Then** the first customer sees an error message "That was the last unit and someone just reserved it" and the Reserve button is disabled.
 
-5. **Given** an offer has expired or been paused, **When** a customer attempts to purchase from an old message, **Then** the system shows a clear error explaining the offer is no longer available.
+5. **Given** an offer has expired or been paused, **When** a customer attempts to reserve from an old message, **Then** the system shows a clear error explaining the offer is no longer available.
 
-6. **Given** a customer has completed purchase, **When** they use `/my_purchases`, **Then** they see a list of their purchases with pickup details and status.
+6. **Given** a customer has completed reservation, **When** they use `/my_reservations`, **Then** they see a list of their active reservations with pickup details, amount to pay, and status.
 
 ---
 
@@ -93,39 +106,39 @@ A new business user wants to register their business through the Telegram bot wi
 
 ---
 
-### User Story 5 - Customer Cancels Purchase Before Pickup (Priority: P3)
+### User Story 5 - Customer Cancels Reservation Before Pickup (Priority: P3)
 
-A customer who has purchased a deal wants to cancel it before the pickup window ends, understanding there is no refund but wanting to release the unit for others.
+A customer who has reserved a deal wants to cancel it before the pickup window ends, allowing the units to return to available inventory for others.
 
-**Why this priority**: While cancellations should be rare, supporting them improves customer trust and allows inventory to return to available pool if plans change.
+**Why this priority**: While cancellations should be rare, supporting them improves customer trust and allows inventory to return to available pool if plans change. Since no payment has occurred yet, cancellation is straightforward.
 
-**Independent Test**: A customer with an active purchase can access `/my_purchases`, select a purchase that hasn't reached pickup end time yet, tap Cancel, confirm the action, and see the purchase marked as cancelled with units returned to inventory.
+**Independent Test**: A customer with an active reservation can access `/my_reservations`, select a reservation that hasn't reached pickup end time yet, tap Cancel, confirm the action, and see the reservation marked as cancelled with units returned to inventory.
 
 **Acceptance Scenarios**:
 
-1. **Given** a customer has an active purchase before pickup end time, **When** they view it in `/my_purchases` and tap Cancel, **Then** they see a confirmation prompt warning no refund is provided.
+1. **Given** a customer has an active reservation before pickup end time, **When** they view it in `/my_reservations` and tap Cancel, **Then** they see a confirmation prompt "Cancel this reservation? The items will become available for others."
 
-2. **Given** a customer confirms cancellation, **When** cancellation is processed, **Then** the purchase is marked CANCELLED, the reserved units are returned to offer inventory, and customer sees confirmation.
+2. **Given** a customer confirms cancellation, **When** cancellation is processed, **Then** the reservation is marked CANCELLED, the reserved units are returned to offer inventory, and customer sees confirmation.
 
-3. **Given** a customer attempts to cancel after pickup end time, **When** they view the purchase, **Then** no Cancel button is shown.
+3. **Given** a customer attempts to cancel after pickup end time, **When** they view the reservation, **Then** no Cancel button is shown.
 
 ---
 
 ### Edge Cases
 
-- **Offer expires during checkout**: If a customer is viewing an offer detail page or payment screen when the offer end time passes, the system validates expiration before processing payment and shows error: "This offer expired at [time]. You won't be charged."
+- **Offer expires during reservation**: If a customer is viewing an offer detail page when the offer end time passes, the system validates expiration before processing reservation and shows error: "This offer expired at [time]."
 
-- **Business deletes or pauses offer during customer checkout**: If offer state changes to PAUSED or UNPUBLISHED while payment is in progress, the system rejects the payment and shows: "This offer is currently unavailable. Try another deal."
+- **Business deletes or pauses offer during customer reservation**: If offer state changes to PAUSED or UNPUBLISHED while reservation is in progress, the system rejects the reservation and shows: "This offer is currently unavailable. Try another deal."
 
-- **Zero inventory during purchase attempt**: If available quantity reaches 0 due to another transaction, the system immediately shows "Sold out" and disables Buy buttons across all customer views.
+- **Zero inventory during reservation attempt**: If available quantity reaches 0 due to another transaction, the system immediately shows "Sold out" and disables Reserve buttons across all customer views.
 
 - **Invalid or ambiguous business address**: If business registration includes incomplete address (missing city or postal code), the system prompts: "I couldn't find the [field] field. Please send [example]." On customer side, if address is malformed, show: "Address unavailable - please contact the venue."
 
-- **Payment provider failure**: If Stripe or payment gateway is unavailable, show: "We couldn't start checkout right now. Your card hasn't been charged. Please try again later."
-
 - **Duplicate registrations**: If a business attempts to register multiple times, system checks for existing business by name + address combination and prompts: "A business with this name and address already exists. Contact support if you need access."
 
-- **Rapid quantity changes**: If business rapidly edits quantity up and down during active purchases, system maintains transactional integrity through purchase reservation locks and ensures no overselling occurs.
+- **Rapid quantity changes**: If business rapidly edits quantity up and down during active reservations, system maintains transactional integrity through reservation locks and ensures no overselling occurs.
+
+- **Customer no-show**: If a customer reserves but doesn't show up during pickup window, the reservation automatically expires at pickup end time and units remain decremented (business handles no-shows manually).
 
 ## Requirements *(mandatory)*
 
@@ -139,7 +152,7 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **FR-003**: System MUST require business registration (name, address, optional contact, optional photo) and manual admin approval before allowing businesses to post offers.
 
-- **FR-004**: System MUST automatically expire offers when current time exceeds the offer end time, changing state to EXPIRED and removing from customer browse results.
+- **FR-004**: System MUST automatically expire offers when current time exceeds the offer end time, changing state to EXPIRED and removing from customer browse results, with expiration checks running every 1 minute.
 
 - **FR-005**: Businesses MUST be able to pause active offers, which sets state to PAUSED, adds a paused indicator to customer views, and disables Buy buttons.
 
@@ -153,7 +166,7 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 #### Customer Features
 
-- **FR-010**: System MUST provide customers with `/browse` command to discover active offers, with optional filters (Nearby, All deals, Ending soon).
+- **FR-010**: System MUST provide customers with `/browse` command to discover active offers, with optional filters (Nearby within 5km/3 miles radius, All deals, Ending soon).
 
 - **FR-011**: System MUST display offer cards showing business name, address (short form), price, pickup time window, and remaining units.
 
@@ -161,21 +174,21 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **FR-013**: System MUST provide quantity selector (with +/- buttons) limited by available inventory when customer views offer details.
 
-- **FR-014**: System MUST integrate Telegram Payments with external payment provider (Stripe) for checkout, using `sendInvoice`, `answerPreCheckoutQuery`, and `successful_payment` handlers.
+- **FR-014**: System MUST implement reservation confirmation flow showing total price and payment instructions ("Payment on-site at pickup") before creating reservation.
 
-- **FR-015**: System MUST create temporary inventory reservation when customer initiates purchase and before payment, releasing reservation if payment fails or times out.
+- **FR-015**: System MUST create confirmed reservation and immediately decrement inventory when customer confirms reservation, with no automatic release (cancellation must be manual via `/my_reservations`).
 
-- **FR-016**: System MUST prevent overselling by enforcing atomic inventory reservation and showing error "That was the last unit and someone just bought it" when race conditions occur.
+- **FR-016**: System MUST prevent overselling by enforcing atomic inventory reservation and showing error "That was the last unit and someone just reserved it" when race conditions occur.
 
-- **FR-017**: System MUST send purchase confirmation message with order ID, business name and address, pickup time window, and redemption instructions after successful payment.
+- **FR-017**: System MUST send reservation confirmation message with order ID, business name and address, pickup time window, total amount to pay on-site, and pickup instructions.
 
-- **FR-018**: Customers MUST be able to view their purchases via `/my_purchases` command showing order ID, pickup details, and status.
+- **FR-018**: Customers MUST be able to view their reservations via `/my_reservations` command showing order ID, pickup details, amount to pay, and status.
 
-- **FR-019**: Customers MUST be able to cancel purchases before pickup end time, which marks purchase as CANCELLED, returns units to inventory, and shows no-refund warning.
+- **FR-019**: Customers MUST be able to cancel reservations before pickup end time, which marks reservation as CANCELLED and returns units to inventory.
 
 #### Navigation and Commands
 
-- **FR-020**: System MUST implement command scopes so businesses see business-specific commands (`/register_business`, `/newdeal`, `/myoffers`) and customers see customer-specific commands (`/browse`, `/my_purchases`).
+- **FR-020**: System MUST implement command scopes so businesses see business-specific commands (`/register_business`, `/newdeal`, `/myoffers`) and customers see customer-specific commands (`/browse`, `/my_reservations`).
 
 - **FR-021**: System MUST provide global commands accessible to all users: `/start` (entry point with role selection), `/help` (feature explanations), `/settings` (language and notification preferences).
 
@@ -183,19 +196,19 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **FR-023**: System MUST implement reply keyboards for simple selections (role selection, filters) marked as `one_time_keyboard=true` to hide after use.
 
-- **FR-024**: System MUST implement inline keyboards for interactive actions (Buy buttons, pagination, management actions) that update existing messages rather than sending new ones.
+- **FR-024**: System MUST implement inline keyboards for interactive actions (Reserve buttons, pagination, management actions) that update existing messages rather than sending new ones.
 
-- **FR-025**: System MUST configure menu button to show role-appropriate commands (businesses see "New deal", "My offers", "Help"; customers see "Browse deals", "My purchases", "Help").
+- **FR-025**: System MUST configure menu button to show role-appropriate commands (businesses see "New deal", "My offers", "Help"; customers see "Browse deals", "My reservations", "Help").
 
 #### Error Handling and States
 
-- **FR-026**: System MUST validate offer availability before processing payment and reject with clear message if offer is expired, paused, or sold out.
+- **FR-026**: System MUST validate offer availability before processing reservation and reject with clear message if offer is expired, paused, or sold out.
 
-- **FR-027**: System MUST handle payment provider failures gracefully with message: "We couldn't start checkout right now. Your card hasn't been charged. Please try again later."
+- **FR-027**: System MUST track offer states: ACTIVE, PAUSED, EXPIRED, EXPIRED_EARLY, SOLD_OUT and enforce appropriate visibility and action permissions for each state.
 
-- **FR-028**: System MUST track offer states: ACTIVE, PAUSED, EXPIRED, EXPIRED_EARLY, SOLD_OUT and enforce appropriate visibility and action permissions for each state.
+- **FR-028**: System MUST provide clear, actionable error messages following pattern: [emoji status indicator] [what went wrong] [what to do next or example].
 
-- **FR-029**: System MUST provide clear, actionable error messages following pattern: [emoji status indicator] [what went wrong] [what to do next or example].
+- **FR-029**: System MUST log key business events with structured data including: offer state transitions (created, published, paused, expired, sold out), reservation lifecycle (reservation created, reservation confirmed, reservation cancelled), inventory changes, and all application errors with contextual metadata for debugging and analytics.
 
 ### Key Entities
 
@@ -203,7 +216,7 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **Offer**: Represents a deal posted by a business. Attributes include title, description, optional photo, price per unit, quantity (total and remaining), pickup time window (start and end), offer state (ACTIVE/PAUSED/EXPIRED/SOLD_OUT/EXPIRED_EARLY), category (optional), creation timestamp, and relationship to Business.
 
-- **Purchase**: Represents a customer's completed transaction. Attributes include order ID, quantity purchased, total price, purchase timestamp, pickup time window (inherited from Offer), purchase status (CONFIRMED/CANCELLED), payment details, and relationships to Customer and Offer.
+- **Reservation**: Represents a customer's confirmed reservation for on-site payment. Attributes include order ID, quantity reserved, total price (to be paid on-site), reservation timestamp, pickup time window (inherited from Offer), reservation status (CONFIRMED/CANCELLED), and relationships to Customer and Offer.
 
 - **User**: Represents any bot user. Attributes include Telegram user ID, role (BUSINESS/CUSTOMER), language preference, notification settings, and registration timestamp.
 
@@ -213,13 +226,13 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **SC-001**: Verified businesses can create and publish a complete offer in under 2 minutes from initiating `/newdeal` to receiving confirmation message.
 
-- **SC-002**: 95% of purchase attempts that reach the payment step complete successfully without errors (excluding user-initiated cancellations).
+- **SC-002**: 95% of reservation attempts complete successfully without errors (excluding user-initiated cancellations or sold-out items).
 
 - **SC-003**: Customers can see a relevant active deal within 10 seconds of using `/browse` command.
 
-- **SC-004**: Overselling occurs in less than 0.1% of transactions when multiple customers attempt to purchase the last unit simultaneously.
+- **SC-004**: Overselling occurs in less than 0.1% of transactions when multiple customers attempt to reserve the last unit simultaneously.
 
-- **SC-005**: Purchase confirmation messages include all required information (order ID, business address, pickup time, redemption instructions) in 100% of successful transactions.
+- **SC-005**: Reservation confirmation messages include all required information (order ID, business address, pickup time, amount to pay on-site, pickup instructions) in 100% of successful reservations.
 
 - **SC-006**: Businesses can pause, edit, or end an offer within 5 seconds, with changes reflected in customer views within 2 seconds.
 
@@ -227,15 +240,15 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 
 - **SC-008**: New businesses can complete registration in under 3 minutes from starting the bot to submitting for approval.
 
-- **SC-009**: Customers can complete purchase cancellation (if before pickup time) in under 30 seconds from opening `/my_purchases` to receiving cancellation confirmation.
+- **SC-009**: Customers can complete reservation cancellation (if before pickup time) in under 30 seconds from opening `/my_reservations` to receiving cancellation confirmation.
 
-- **SC-010**: 90% of customers successfully complete their first purchase attempt without needing to retry or seek help.
+- **SC-010**: 90% of customers successfully complete their first reservation attempt without needing to retry or seek help.
 
 ## Assumptions *(optional)*
 
-- Telegram bot API and Telegram Payments infrastructure maintain 99.9% uptime during marketplace operating hours.
+- Telegram bot API maintains 99.9% uptime during marketplace operating hours.
 
-- Stripe (or selected payment provider) processes payments within 3-5 seconds under normal load.
+- Businesses handle on-site payments manually (cash, card terminal, or other methods at their discretion).
 
 - Admin business verification occurs within 24 hours of registration submission on average.
 
@@ -252,9 +265,9 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 ### In Scope
 
 - Complete UX flows for business onboarding, offer posting, and offer management
-- Complete UX flows for customer discovery, purchase, and purchase management  
+- Complete UX flows for customer discovery, reservation, and reservation management  
 - Integration with Telegram's native UI elements (commands, keyboards, inline buttons)
-- Payment integration using Telegram Payments with Stripe provider
+- On-site payment model (customers pay at pickup, not through app)
 - Real-time inventory management and reservation system
 - Admin approval workflow for new businesses
 - Deep linking for offer sharing and contextual entry
@@ -270,14 +283,14 @@ A customer who has purchased a deal wants to cancel it before the pickup window 
 - Automated fraud detection or business verification (manual admin approval only)
 - In-app messaging between customers and businesses (contact via phone if needed)
 - QR code generation for redemption (order ID display only)
-- Refund processing (no refunds per cancellation policy)
+- Payment processing through app (customers pay on-site only)
+- Refund processing (no refunds since payment is on-site)
 - Subscription or membership features for businesses or customers
+- Payment tracking or receipt generation (businesses handle their own payment records)
 
 ## Dependencies *(optional)*
 
 - **Telegram Bot API**: Core platform for all user interactions, requires bot token from BotFather
-- **Telegram Payments API**: Payment infrastructure, requires payment provider token configuration
-- **Stripe payment provider**: External payment processing, requires Stripe account and API keys
 - **Geolocation services**: For "Nearby" filtering, requires geocoding API (e.g., Google Maps, Mapbox)
 - **Image storage**: For business logos and offer photos, requires cloud storage (e.g., AWS S3, Cloudflare R2)
 - **Admin approval mechanism**: External or internal tool for business verification, requires integration endpoint

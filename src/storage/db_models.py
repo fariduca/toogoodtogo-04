@@ -9,6 +9,8 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -24,8 +26,9 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 from src.models.business import VerificationStatus
-from src.models.offer import OfferStatus
-from src.models.purchase import PaymentProvider, PurchaseStatus
+from src.models.offer import OfferCategory, OfferStatus
+from src.models.reservation import ReservationStatus
+from src.models.user import UserRole
 
 
 class Base(DeclarativeBase):
@@ -34,52 +37,74 @@ class Base(DeclarativeBase):
     pass
 
 
+class UserTable(Base):
+    """User entity table."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id = Column(BigInteger, nullable=False, unique=True, index=True)
+    telegram_username = Column(String(100), nullable=True)
+    role = Column(
+        Enum(UserRole, native_enum=True),
+        nullable=False,
+        index=True,
+    )
+    language_code = Column(String(2), nullable=False, default="en")
+    notification_enabled = Column(Boolean, nullable=False, default=True)
+    last_location_lat = Column(Numeric(9, 6), nullable=True)
+    last_location_lon = Column(Numeric(9, 6), nullable=True)
+    last_location_updated = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    businesses = relationship("BusinessTable", back_populates="owner", foreign_keys="BusinessTable.owner_id")
+    reservations = relationship("ReservationTable", back_populates="customer", foreign_keys="ReservationTable.customer_id")
+
+    __table_args__ = (
+        Index("ix_users_telegram_user_id", telegram_user_id),
+        Index("ix_users_role", role),
+    )
+
+
 class BusinessTable(Base):
     """Business entity table."""
 
     __tablename__ = "businesses"
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    name = Column(String(100), nullable=False, index=True)
-    telegram_id = Column(Integer, nullable=False, unique=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    business_name = Column(String(200), nullable=False, index=True)
+    street_address = Column(String(200), nullable=False)
+    city = Column(String(100), nullable=False)
+    postal_code = Column(String(20), nullable=False)
+    country_code = Column(String(2), nullable=False, default="FI")
+    latitude = Column(Numeric(9, 6), nullable=True)
+    longitude = Column(Numeric(9, 6), nullable=True)
+    contact_phone = Column(String(20), nullable=True)
+    logo_url = Column(String(500), nullable=True)
     verification_status = Column(
         Enum(VerificationStatus, native_enum=True),
         nullable=False,
         default=VerificationStatus.PENDING,
         index=True,
     )
-    photo_url = Column(String(500), nullable=True)
+    verification_notes = Column(Text, nullable=True)
+    verified_at = Column(DateTime, nullable=True)
+    verified_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    venue = relationship("VenueTable", back_populates="business", uselist=False, cascade="all, delete-orphan")
+    owner = relationship("UserTable", back_populates="businesses", foreign_keys=[owner_id])
     offers = relationship("OfferTable", back_populates="business", cascade="all, delete-orphan")
 
     __table_args__ = (
+        Index("ix_businesses_owner_id", owner_id),
         Index("ix_businesses_verification_status", verification_status),
-        Index("ix_businesses_telegram_id", telegram_id),
-    )
-
-
-class VenueTable(Base):
-    """Venue entity table."""
-
-    __tablename__ = "venues"
-
-    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    business_id = Column(PG_UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, unique=True)
-    address = Column(String(500), nullable=False)
-    latitude = Column(Numeric(10, 8), nullable=False)
-    longitude = Column(Numeric(11, 8), nullable=False)
-
-    # Relationships
-    business = relationship("BusinessTable", back_populates="venue")
-
-    __table_args__ = (
-        CheckConstraint("latitude >= -90 AND latitude <= 90", name="check_latitude_range"),
-        CheckConstraint("longitude >= -180 AND longitude <= 180", name="check_longitude_range"),
-        Index("ix_venues_coordinates", "latitude", "longitude"),
+        Index("ix_businesses_location", latitude, longitude),
+        Index("ix_businesses_name_postal", business_name, postal_code, unique=True),
     )
 
 
@@ -90,71 +115,80 @@ class OfferTable(Base):
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
     business_id = Column(PG_UUID(as_uuid=True), ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String(120), nullable=False)
-    items = Column(JSON, nullable=False)  # List of {name, unit_price, quantity_available}
-    start_time = Column(DateTime, nullable=False, index=True)
-    end_time = Column(DateTime, nullable=False, index=True)
-    status = Column(
+    title = Column(String(100), nullable=False)
+    description = Column(Text, nullable=False)
+    photo_url = Column(String(500), nullable=True)
+    category = Column(Enum(OfferCategory, native_enum=True), nullable=True)
+    price_per_unit = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="EUR")
+    quantity_total = Column(Integer, nullable=False)
+    quantity_remaining = Column(Integer, nullable=False)
+    pickup_start_time = Column(DateTime, nullable=False)
+    pickup_end_time = Column(DateTime, nullable=False, index=True)
+    state = Column(
         Enum(OfferStatus, native_enum=True),
         nullable=False,
-        default=OfferStatus.DRAFT,
+        default=OfferStatus.ACTIVE,
         index=True,
     )
-    image_url = Column(String(500), nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    published_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     business = relationship("BusinessTable", back_populates="offers")
-    purchases = relationship("PurchaseTable", back_populates="offer", cascade="all, delete-orphan")
+    reservations = relationship("ReservationTable", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
-        CheckConstraint("start_time < end_time", name="check_time_range"),
-        Index("ix_offers_status_end_time", status, end_time),
-        Index("ix_offers_business_status", business_id, status),
+        CheckConstraint("pickup_start_time < pickup_end_time", name="check_time_range"),
+        CheckConstraint("price_per_unit > 0", name="check_positive_price"),
+        CheckConstraint("quantity_total > 0", name="check_positive_total_quantity"),
+        CheckConstraint("quantity_remaining >= 0", name="check_nonnegative_remaining"),
+        CheckConstraint("quantity_remaining <= quantity_total", name="check_remaining_le_total"),
+        Index("ix_offers_state_pickup_end", state, pickup_end_time),
+        Index("ix_offers_state_created", state, created_at.desc()),
+        Index("ix_offers_business_state", business_id, state),
+        Index("ix_offers_category", category),
     )
 
 
-class CustomerTable(Base):
-    """Customer entity table."""
+class ReservationTable(Base):
+    """Reservation entity table."""
 
-    __tablename__ = "customers"
-
-    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
-    telegram_id = Column(Integer, nullable=False, unique=True, index=True)
-    username = Column(String(100), nullable=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-
-
-class PurchaseTable(Base):
-    """Purchase entity table."""
-
-    __tablename__ = "purchases"
+    __tablename__ = "reservations"
 
     id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    order_id = Column(String(12), nullable=False, unique=True, index=True)
     offer_id = Column(PG_UUID(as_uuid=True), ForeignKey("offers.id", ondelete="CASCADE"), nullable=False, index=True)
-    customer_id = Column(Integer, nullable=False, index=True)  # Telegram user ID
-    item_selections = Column(JSON, nullable=False)  # List of {item_name, quantity, unit_price}
-    total_amount = Column(Numeric(10, 2), nullable=False)
+    customer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    quantity = Column(Integer, nullable=False)
+    unit_price = Column(Numeric(10, 2), nullable=False)
+    total_price = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="EUR")
     status = Column(
-        Enum(PurchaseStatus, native_enum=True),
+        Enum(ReservationStatus, native_enum=True),
         nullable=False,
-        default=PurchaseStatus.PENDING,
+        default=ReservationStatus.CONFIRMED,
         index=True,
     )
-    payment_provider = Column(
-        Enum(PaymentProvider, native_enum=True),
-        nullable=True,
-    )
-    payment_session_id = Column(String(200), nullable=True)
+    pickup_start_time = Column(DateTime, nullable=False)
+    pickup_end_time = Column(DateTime, nullable=False)
+    cancellation_reason = Column(Text, nullable=True)
+    cancelled_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
-    offer = relationship("OfferTable", back_populates="purchases")
+    offer = relationship("OfferTable", back_populates="reservations")
+    customer = relationship("UserTable", back_populates="reservations", foreign_keys=[customer_id])
 
     __table_args__ = (
-        CheckConstraint("total_amount > 0", name="check_positive_total"),
-        Index("ix_purchases_offer_status", offer_id, status),
-        Index("ix_purchases_customer_id", customer_id),
+        CheckConstraint("quantity > 0", name="check_positive_quantity"),
+        CheckConstraint("unit_price > 0", name="check_positive_unit_price"),
+        CheckConstraint("total_price > 0", name="check_positive_total_price"),
+        Index("ix_reservations_offer_id", offer_id),
+        Index("ix_reservations_customer_id", customer_id),
+        Index("ix_reservations_order_id", order_id, unique=True),
+        Index("ix_reservations_customer_created", customer_id, created_at.desc()),
+        Index("ix_reservations_status", status),
     )

@@ -1,43 +1,88 @@
-"""Discovery ranking service for offers."""
+"""Discovery ranking service with geolocation filtering."""
 
-from uuid import UUID
+import math
+from typing import Optional
 
 from src.models.offer import Offer
 
 
 class DiscoveryRankingService:
-    """Service for ranking offers in discovery view."""
+    """Service for ranking and filtering offers based on geolocation."""
 
-    def __init__(self):
+    def __init__(self, nearby_radius_km: float = 5.0):
         """Initialize discovery ranking service."""
-        pass
+        self.nearby_radius_km = nearby_radius_km
 
-    async def rank_offers(
+    def calculate_distance(
         self,
-        offers: list[Offer],
-        user_id: int | None = None,
-        user_location: tuple[float, float] | None = None,
-    ) -> list[Offer]:
-        """Rank offers for discovery.
-
-        MVP strategy: Latest + simple popularity (purchase count).
-        Future: Add geo proximity, category weighting.
-        """
-        # For MVP, sort by created_at (latest first)
-        # TODO: Add popularity score from purchase count
-        # TODO: Add geo proximity weighting when coordinates available
-        return sorted(offers, key=lambda o: o.created_at, reverse=True)
-
-    async def get_popularity_score(self, offer_id: UUID) -> int:
-        """Get popularity score (purchase count) for offer."""
-        # TODO: Query purchase repository for confirmed purchase count
-        return 0
-
-    async def calculate_distance(
-        self,
-        location1: tuple[float, float],
-        location2: tuple[float, float],
+        lat1: float,
+        lon1: float,
+        lat2: float,
+        lon2: float,
     ) -> float:
-        """Calculate distance between two coordinates (km)."""
-        # TODO: Implement haversine formula for geo distance
-        return 0.0
+        """Calculate distance between two coordinates using Haversine formula.
+        
+        Returns distance in kilometers.
+        """
+        # Earth's radius in kilometers
+        R = 6371.0
+
+        # Convert degrees to radians
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+
+        # Haversine formula
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        distance = R * c
+        return distance
+
+    def is_within_radius(
+        self,
+        user_lat: float,
+        user_lon: float,
+        business_lat: float,
+        business_lon: float,
+        radius_km: Optional[float] = None,
+    ) -> bool:
+        """Check if business is within specified radius of user."""
+        radius = radius_km if radius_km is not None else self.nearby_radius_km
+        distance = self.calculate_distance(user_lat, user_lon, business_lat, business_lon)
+        return distance <= radius
+
+    def filter_offers_by_location(
+        self,
+        offers: list[tuple[Offer, float, float]],  # (offer, business_lat, business_lon)
+        user_lat: float,
+        user_lon: float,
+    ) -> list[tuple[Offer, float]]:  # (offer, distance_km)
+        """Filter offers by proximity and return with distances."""
+        results = []
+        for offer, business_lat, business_lon in offers:
+            distance = self.calculate_distance(
+                user_lat, user_lon, business_lat, business_lon
+            )
+            if distance <= self.nearby_radius_km:
+                results.append((offer, distance))
+
+        # Sort by distance (closest first)
+        results.sort(key=lambda x: x[1])
+        return results
+
+    def rank_offers(
+        self,
+        offers: list[tuple[Offer, float]],  # (offer, distance_km)
+    ) -> list[Offer]:
+        """Rank offers by distance and recency."""
+        # For MVP, simple ranking: closest first, then most recent
+        # Already sorted by distance from filter_offers_by_location
+        return [offer for offer, _ in offers]

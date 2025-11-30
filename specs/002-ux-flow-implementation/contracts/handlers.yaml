@@ -1,0 +1,893 @@
+# Handler Contracts
+
+**Feature**: 002-ux-flow-implementation  
+**Purpose**: Define inputs, outputs, and behaviors for all bot handlers  
+**Format**: YAML for machine readability and validation
+
+---
+
+## Global Commands
+
+### `/start` - Entry Point & Role Selection
+
+**Trigger**: Command `/start` with optional deep link parameter  
+**Permissions**: Public (any user)  
+**Rate Limit**: 10 requests/minute per user
+
+**Input**:
+```yaml
+command: "/start"
+parameters:
+  - name: context
+    type: string
+    required: false
+    description: Deep link context (e.g., "offer_uuid-123", "business_invite_token-abc")
+    examples:
+      - "offer_abcd-1234-5678"
+      - "business_invite_xyz789"
+      - null
+```
+
+**Behavior**:
+1. If user exists → Check role and redirect to appropriate flow
+2. If new user → Show role selection keyboard
+3. If deep link parameter → Parse context and route accordingly
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_keyboard
+    text: "Hi 👋 I help you sell today's excess produce at a discount. What describes you best?"
+    keyboard:
+      type: reply_keyboard
+      buttons:
+        - ["I'm a business"]
+        - ["I'm a customer"]
+      one_time: true
+      
+  - type: redirect
+    condition: user.role == 'BUSINESS' and deep_link matches 'offer_*'
+    target_handler: offer_detail_handler
+    
+error_responses:
+  - condition: invalid_deep_link_format
+    text: "That link doesn't look right. Try /start to begin."
+```
+
+---
+
+### `/help` - Feature Explanations
+
+**Trigger**: Command `/help`  
+**Permissions**: Public  
+**Rate Limit**: 5 requests/minute per user
+
+**Input**:
+```yaml
+command: "/help"
+parameters: []
+```
+
+**Behavior**:
+1. Show role-specific help based on user.role
+2. Display inline keyboard with quick action buttons
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text_business: |
+      **How to post deals:**
+      1. Use /newdeal to create an offer
+      2. Set price, quantity, and pickup time
+      3. Your deal goes live instantly!
+      
+      **Manage offers**: /myoffers
+    text_customer: |
+      **How to reserve deals:**
+      1. Use /browse to see nearby offers
+      2. Tap Reserve and confirm
+      3. Pay on-site when you pick up!
+      
+      **Your reservations**: /my_reservations
+    inline_keyboard:
+      business:
+        - [{"text": "Post a deal", "callback_data": "action:newdeal"}]
+        - [{"text": "My offers", "callback_data": "action:myoffers"}]
+      customer:
+        - [{"text": "Browse deals", "callback_data": "action:browse"}]
+        - [{"text": "My reservations", "callback_data": "action:my_reservations"}]
+```
+
+---
+
+### `/settings` - User Preferences
+
+**Trigger**: Command `/settings`  
+**Permissions**: Authenticated user  
+**Rate Limit**: 5 requests/minute per user
+
+**Input**:
+```yaml
+command: "/settings"
+parameters: []
+```
+
+**Behavior**:
+1. Display current settings (language, notifications)
+2. Provide inline keyboard to modify settings
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: |
+      ⚙️ **Your Settings**
+      Language: {user.language_code}
+      Notifications: {'Enabled' if user.notification_enabled else 'Disabled'}
+    inline_keyboard:
+      - [{"text": "🔔 Toggle Notifications", "callback_data": "settings:toggle_notifications"}]
+      - [{"text": "🌍 Change Language", "callback_data": "settings:change_language"}]
+```
+
+---
+
+## Business Handlers
+
+### `/register_business` - Business Registration
+
+**Trigger**: Command `/register_business` or button from /start  
+**Permissions**: User with role='BUSINESS', not already registered  
+**Rate Limit**: 3 attempts/hour per user
+
+**Input**:
+```yaml
+command: "/register_business"
+state_machine:
+  states:
+    - collect_business_name
+    - collect_street_address
+    - collect_city
+    - collect_postal_code
+    - collect_phone (optional)
+    - collect_logo (optional)
+    - confirm_submission
+```
+
+**Behavior** (Multi-step conversation):
+1. Request business name
+2. Request street address
+3. Request city
+4. Request postal code
+5. Geocode address → lat/lng
+6. Request optional phone
+7. Request optional logo photo
+8. Show summary with inline keyboard: [Confirm & submit] [Edit] [Cancel]
+9. On confirm → Create Business record with status='PENDING'
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message
+    text: "Thanks! An admin will verify your business (name + address only). You'll get a notification here when you're approved."
+    
+  - type: follow_up_notification (async, when approved)
+    text: "✅ Your business is approved. You can now post deals that customers see instantly."
+    inline_keyboard:
+      - [{"text": "Post a deal now", "callback_data": "action:newdeal"}]
+      - [{"text": "Learn how it works", "callback_data": "action:help"}]
+    
+error_responses:
+  - condition: invalid_postal_code_format
+    text: "That postal code doesn't look right for {country}. Please send it like '00100'."
+    
+  - condition: duplicate_business
+    text: "A business with this name and address already exists. Contact support if you need access."
+    
+  - condition: geocoding_failed
+    text: "We couldn't find that address. Please double-check the street, city, and postal code."
+```
+
+---
+
+### `/newdeal` - Create New Offer
+
+**Trigger**: Command `/newdeal` or button  
+**Permissions**: Business owner with verification_status='APPROVED'  
+**Rate Limit**: 10 offers/hour per business
+
+**Input**:
+```yaml
+command: "/newdeal"
+state_machine:
+  states:
+    - select_category (optional)
+    - collect_title
+    - collect_description
+    - collect_photo (optional but recommended)
+    - collect_time_window
+    - collect_quantity
+    - collect_price
+    - confirm_publish
+```
+
+**Behavior** (Multi-step conversation):
+1. Ask for category (reply keyboard)
+2. Collect title (text message)
+3. Collect description (text message, max 200 chars)
+4. Request photo (optional)
+5. Ask for time window (reply keyboard presets or custom)
+6. Collect quantity (integer validation)
+7. Collect price per unit (decimal validation)
+8. Show offer summary with inline keyboard: [Publish deal] [Edit field] [Cancel]
+9. On publish → Create Offer with state='ACTIVE'
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_photo
+    photo: offer.photo_url
+    text: |
+      **{offer.title} – {offer.price_per_unit}€**
+      🏪 *{business.business_name}*
+      📍 *{business.street_address}, {business.city}*
+      ⏰ *{offer.pickup_start_time} – {offer.pickup_end_time}*
+      📦 *Quantity:* {offer.quantity_total}
+      📝 *Description:* "{offer.description}"
+      
+      ✅ Deal published! Customers can see this until {offer.pickup_end_time} or until it's sold out.
+    inline_keyboard:
+      - [{"text": "View as customer", "url": "https://t.me/{BOT_USERNAME}?start=offer_{offer.id}"}]
+      - [{"text": "Share link", "switch_inline_query": "Check out this deal!"}]
+      - [{"text": "Manage offer", "callback_data": "manage:offer:{offer.id}"}]
+    
+error_responses:
+  - condition: business_not_approved
+    text: "You need an approved business account to post deals. Use /register_business first."
+    
+  - condition: invalid_quantity
+    text: "That doesn't look like a number. Send just the amount, e.g. `5`."
+    
+  - condition: invalid_price
+    text: "That doesn't look like a number. Send just the amount, e.g. `5` or `4.50`."
+    
+  - condition: invalid_time_window
+    text: "Pickup end time must be after start time and within 24 hours."
+```
+
+---
+
+### `/myoffers` - Business Offer Management
+
+**Trigger**: Command `/myoffers` or button  
+**Permissions**: Business owner  
+**Rate Limit**: 20 requests/minute per business
+
+**Input**:
+```yaml
+command: "/myoffers"
+parameters: []
+```
+
+**Behavior**:
+1. Query offers owned by user's business
+2. Display each offer as card with inline management buttons
+3. Support pagination if >5 offers
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: "Your active offers 👇"
+    
+  - type: offer_card (for each offer)
+    text: |
+      **{offer.title} – {offer.price_per_unit}€**
+      Status: `{offer.state}`
+      Units left: {offer.quantity_remaining}
+      Ends: *{offer.pickup_end_time}*
+    inline_keyboard:
+      active_offer:
+        - [{"text": "Pause", "callback_data": "offer:pause:{offer.id}"}]
+        - [{"text": "Edit", "callback_data": "offer:edit:{offer.id}"}, 
+           {"text": "End now", "callback_data": "offer:end:{offer.id}"}]
+        - [{"text": "View as customer", "url": "https://t.me/{BOT_USERNAME}?start=offer_{offer.id}"}]
+      paused_offer:
+        - [{"text": "Resume", "callback_data": "offer:resume:{offer.id}"}]
+        - [{"text": "View as customer", "url": "https://t.me/{BOT_USERNAME}?start=offer_{offer.id}"}]
+    
+  - type: empty_state
+    condition: no_offers_exist
+    text: "You haven't posted any offers yet. Use /newdeal to create your first deal!"
+    inline_keyboard:
+      - [{"text": "Post a deal", "callback_data": "action:newdeal"}]
+```
+
+---
+
+### Callback: `offer:pause:{offer_id}` - Pause Offer
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Offer owner  
+**Rate Limit**: 10 actions/minute per user
+
+**Input**:
+```yaml
+callback_data: "offer:pause:{offer_id}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+```
+
+**Behavior**:
+1. Verify user owns offer
+2. Check offer state is 'ACTIVE'
+3. Update offer.state to 'PAUSED'
+4. Edit inline keyboard to show 'Resume' button
+5. Answer callback query (acknowledge button press)
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: answer_callback_query
+    text: "✅ Offer paused"
+    
+  - type: edit_message_inline_keyboard
+    updated_buttons:
+      - [{"text": "Resume", "callback_data": "offer:resume:{offer.id}"}]
+      - [{"text": "View as customer", "url": "..."}]
+    
+error_responses:
+  - condition: offer_not_found_or_no_permission
+    answer_callback_query:
+      text: "❌ You don't have permission to manage this offer."
+      show_alert: true
+      
+  - condition: offer_not_active
+    answer_callback_query:
+      text: "❌ This offer is already paused or expired."
+      show_alert: false
+```
+
+---
+
+### Callback: `offer:resume:{offer_id}` - Resume Offer
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Offer owner  
+**Rate Limit**: 10 actions/minute per user
+
+**Input**:
+```yaml
+callback_data: "offer:resume:{offer_id}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+```
+
+**Behavior**:
+1. Verify user owns offer
+2. Check offer state is 'PAUSED' and pickup_end_time > now()
+3. Update offer.state to 'ACTIVE'
+4. Edit inline keyboard to show 'Pause' button
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: answer_callback_query
+    text: "✅ Offer resumed"
+    
+  - type: edit_message_inline_keyboard
+    updated_buttons:
+      - [{"text": "Pause", "callback_data": "offer:pause:{offer.id}"}]
+    
+error_responses:
+  - condition: offer_expired_cannot_resume
+    answer_callback_query:
+      text: "❌ This offer has expired and cannot be resumed."
+      show_alert: true
+```
+
+---
+
+### Callback: `offer:edit:{offer_id}` - Edit Offer Field
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Offer owner  
+**Rate Limit**: 10 actions/minute per user
+
+**Input**:
+```yaml
+callback_data: "offer:edit:{offer_id}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+state_machine:
+  states:
+    - select_field_to_edit
+    - collect_new_value
+    - confirm_update
+```
+
+**Behavior**:
+1. Show inline keyboard with editable fields: [Price] [Quantity] [Time window] [Description]
+2. On field selection, prompt for new value
+3. Validate input
+4. Update offer record
+5. If quantity set to 0 → state becomes 'SOLD_OUT'
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: "What would you like to edit?"
+    inline_keyboard:
+      - [{"text": "Price", "callback_data": "edit_field:price:{offer.id}"}]
+      - [{"text": "Quantity", "callback_data": "edit_field:quantity:{offer.id}"}]
+      - [{"text": "Time window", "callback_data": "edit_field:time:{offer.id}"}]
+      - [{"text": "Description", "callback_data": "edit_field:description:{offer.id}"}]
+      - [{"text": "Cancel", "callback_data": "action:myoffers"}]
+    
+  - type: confirmation_message (after update)
+    text: "✅ Price updated to **{new_price}€**."
+    
+error_responses:
+  - condition: invalid_new_value
+    text: "That value doesn't look right. Current quantity: **{current_quantity}**. Send new remaining quantity (0–{max_quantity})."
+```
+
+---
+
+### Callback: `offer:end:{offer_id}` - End Offer Early
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Offer owner  
+**Rate Limit**: 10 actions/minute per user
+
+**Input**:
+```yaml
+callback_data: "offer:end:{offer_id}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+```
+
+**Behavior**:
+1. Show confirmation dialog
+2. On confirm, update offer.state to 'EXPIRED_EARLY'
+3. Remove from customer browse results
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: "End this offer now? Customers won't be able to reserve it. This can't be undone."
+    inline_keyboard:
+      - [{"text": "Yes, end now", "callback_data": "confirm_end:{offer.id}"}]
+      - [{"text": "No", "callback_data": "action:myoffers"}]
+    
+  - type: confirmation_message (after ending)
+    text: "✅ Offer ended. Status: Ended early."
+    
+error_responses:
+  - condition: offer_already_ended
+    answer_callback_query:
+      text: "This offer has already ended."
+      show_alert: false
+```
+
+---
+
+## Customer Handlers
+
+### `/browse` - Discover Offers
+
+**Trigger**: Command `/browse` or button  
+**Permissions**: User with role='CUSTOMER'  
+**Rate Limit**: 30 requests/minute per user
+
+**Input**:
+```yaml
+command: "/browse"
+parameters:
+  - name: filter
+    type: enum
+    values: ["nearby", "all", "ending_soon"]
+    default: "nearby"
+    required: false
+  - name: page
+    type: integer
+    default: 0
+    required: false
+```
+
+**Behavior**:
+1. Request user location if not available and filter='nearby'
+2. Query active offers based on filter
+3. Apply geolocation filter (5km radius) if filter='nearby'
+4. Paginate results (10 per page)
+5. Display offer cards with inline navigation buttons
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_reply_keyboard
+    text: "Here are deals near you 👇 (Use the buttons to filter or move between deals.)"
+    keyboard:
+      type: reply_keyboard
+      buttons:
+        - ["Nearby", "All deals", "Ending soon"]
+      one_time: false
+    
+  - type: offer_card (for each offer)
+    text: |
+      **{offer.title} – {offer.price_per_unit}€**
+      🏪 *{business.business_name}*
+      📍 *{short_address}*
+      ⏰ *{pickup_time_range}*
+      📦 *Left:* {offer.quantity_remaining}
+    inline_keyboard:
+      - [{"text": "View details", "callback_data": "offer:details:{offer.id}"}]
+      - [{"text": "Reserve", "callback_data": "offer:reserve:{offer.id}"}]
+      - [{"text": "◀️ Prev", "callback_data": "browse:page:{page-1}"}, 
+         {"text": "Next ▶️", "callback_data": "browse:page:{page+1}"}]
+      - [{"text": "Back to filters", "callback_data": "action:browse"}]
+    
+  - type: empty_state
+    condition: no_offers_available
+    text: "No deals available right now. Check back soon!"
+    
+error_responses:
+  - condition: location_required_but_not_shared
+    text: "To see nearby deals, please share your location."
+    keyboard:
+      type: reply_keyboard
+      buttons:
+        - [{"text": "📍 Share Location", "request_location": true}]
+        - ["Show all deals (no location)"]
+```
+
+---
+
+### Callback: `offer:details:{offer_id}` - View Offer Details
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Public (any customer)  
+**Rate Limit**: 30 requests/minute per user
+
+**Input**:
+```yaml
+callback_data: "offer:details:{offer_id}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+```
+
+**Behavior**:
+1. Query offer by ID
+2. Check offer state (ACTIVE, PAUSED, EXPIRED, SOLD_OUT)
+3. Display full details with photo
+4. Show quantity selector and Reserve button if available
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_photo_and_inline_keyboard
+    photo: offer.photo_url
+    text: |
+      **{offer.title} – {offer.price_per_unit}€ each**
+      🏪 *{business.business_name}*
+      📍 *{full_address}*
+      ⏰ *Pickup:* {offer.pickup_start_time} – {offer.pickup_end_time}
+      📦 *Units left:* {offer.quantity_remaining}
+      📝 *Description:* {offer.description}
+    inline_keyboard:
+      available_offer:
+        - [{"text": "➖", "callback_data": "qty:dec:{offer.id}:{current_qty}"}, 
+           {"text": "{current_qty}", "callback_data": "qty:noop"}, 
+           {"text": "➕", "callback_data": "qty:inc:{offer.id}:{current_qty}"}]
+        - [{"text": "Reserve {current_qty} for {total_price}€ (pay on-site)", "callback_data": "reservation:initiate:{offer.id}:{qty}"}]
+        - [{"text": "◀️ Back", "callback_data": "action:browse"}]
+      paused_offer:
+        - [{"text": "⚠️ Paused", "callback_data": "noop"}]
+        - [{"text": "◀️ Back", "callback_data": "action:browse"}]
+    
+error_responses:
+  - condition: offer_not_found
+    answer_callback_query:
+      text: "This offer is no longer available."
+      show_alert: true
+```
+
+---
+
+### Callback: `reservation:initiate:{offer_id}:{quantity}` - Initiate Reservation
+
+**Trigger**: Inline keyboard button press (Reserve button)  
+**Permissions**: Customer  
+**Rate Limit**: 10 reservations/hour per user
+
+**Input**:
+```yaml
+callback_data: "reservation:initiate:{offer_id}:{quantity}"
+parameters:
+  - name: offer_id
+    type: uuid
+    required: true
+  - name: quantity
+    type: integer
+    required: true
+```
+
+**Behavior**:
+1. Validate offer is ACTIVE and quantity_remaining >= requested quantity
+2. Acquire Redis lock (5-second TTL for atomic transaction)
+3. Create Reservation record with status='CONFIRMED'
+4. Decrement offer.quantity_remaining immediately
+5. Generate unique order_id for pickup verification
+6. Send confirmation message with pickup details and payment instructions
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: |
+      🎉 **Reservation confirmed!**
+      **{offer.title} – {quantity} unit(s)**
+      🧔 Order ID: *{reservation.order_id}*
+      📍 *{business.business_name}, {full_address}*
+      ⏰ Pickup by: *{offer.pickup_end_time}*
+      💵 Pay *{total_price}€* on-site when you pick up
+      
+      Show this Order ID at the venue.
+    inline_keyboard:
+      - [{"text": "View on map", "url": "https://maps.google.com/?q={lat},{lon}"}]
+      - [{"text": "My reservations", "callback_data": "action:my_reservations"}]
+    
+error_responses:
+  - condition: offer_expired_during_reservation
+    answer_callback_query:
+      text: "😕 This offer expired at {offer.pickup_end_time}."
+      show_alert: true
+      
+  - condition: offer_sold_out_race_condition
+    answer_callback_query:
+      text: "😕 That was the last unit and someone just reserved it. This deal is now sold out."
+      show_alert: true
+      
+  - condition: offer_paused_during_reservation
+    answer_callback_query:
+      text: "This offer is currently unavailable (paused by the business). Try another deal."
+      show_alert: true
+```
+
+---
+
+### Webhook: Stripe Payment Completed
+
+**Trigger**: Stripe webhook event `checkout.session.completed`  
+**Permissions**: Webhook signature verification  
+**Rate Limit**: None (idempotent handler)
+
+**Input**:
+```yaml
+webhook_event:
+  type: "checkout.session.completed"
+  data:
+    object:
+      id: "cs_test_..."
+      payment_intent: "pi_..."
+      metadata:
+        purchase_id: "uuid-..."
+        offer_id: "uuid-..."
+```
+
+**Behavior**:
+1. Verify webhook signature
+2. Extract purchase_id from metadata
+3. Check if purchase already confirmed (idempotency)
+4. Update Purchase status to 'CONFIRMED'
+5. Confirm Redis reservation (delete key, move to sold counter)
+6. Decrement offer.quantity_remaining
+7. Send confirmation message to customer
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    chat_id: customer.telegram_user_id
+    text: |
+      🎉 **Purchase confirmed!**
+      **{offer.title} – {quantity} unit(s)**
+      🧾 Order ID: *{purchase.id}*
+      📍 *{business.business_name}, {full_address}*
+      ⏰ Pickup by: *{offer.pickup_end_time}*
+      
+      Show this message at the venue. The business might check your Order ID.
+    inline_keyboard:
+      - [{"text": "View on map", "url": "https://maps.google.com/?q={lat},{lon}"}]
+      - [{"text": "My purchases", "callback_data": "action:my_purchases"}]
+      - [{"text": "Share feedback", "callback_data": "feedback:{purchase.id}"}]
+    
+  - type: http_response
+    status_code: 200
+    body: {"received": true}
+    
+error_responses:
+  - condition: purchase_not_found
+    http_response:
+      status_code: 404
+      body: {"error": "purchase_not_found"}
+      
+  - condition: webhook_signature_invalid
+    http_response:
+      status_code: 401
+      body: {"error": "invalid_signature"}
+```
+
+---
+
+### `/my_purchases` - Customer Purchase History
+
+**Trigger**: Command `/my_reservations` or button  
+**Permissions**: Customer  
+**Rate Limit**: 20 requests/minute per user
+
+**Input**:
+```yaml
+command: "/my_reservations"
+parameters: []
+```
+
+**Behavior**:
+1. Query reservations by customer_id
+2. Filter to recent reservations (last 30 days)
+3. Display cards with reservation details and status
+4. Show cancellation option if before pickup_end_time
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: reservation_card (for each reservation)
+    text: |
+      **{offer.title} – {quantity}×**
+      Pickup by *{pickup_end_time}*
+      Status: `{status}`
+      Pay *{total_price}€* on-site
+    inline_keyboard:
+      confirmed_reservation_before_pickup:
+        - [{"text": "Show Order ID", "callback_data": "reservation:show:{reservation.id}"}]
+        - [{"text": "Cancel before pickup", "callback_data": "reservation:cancel:{reservation.id}"}]
+        - [{"text": "◀️ Back", "callback_data": "action:browse"}]
+      confirmed_reservation_after_pickup:
+        - [{"text": "◀️ Back", "callback_data": "action:browse"}]
+      cancelled_reservation:
+        - [{"text": "❌ Cancelled", "callback_data": "noop"}]
+    
+  - type: empty_state
+    condition: no_reservations_exist
+    text: "You haven't made any reservations yet. Use /browse to discover deals!"
+    inline_keyboard:
+      - [{"text": "Browse deals", "callback_data": "action:browse"}]
+```
+
+---
+
+### Callback: `reservation:cancel:{reservation_id}` - Cancel Reservation
+
+**Trigger**: Inline keyboard button press  
+**Permissions**: Reservation owner  
+**Rate Limit**: 10 cancellations/hour per user
+
+**Input**:
+```yaml
+callback_data: "reservation:cancel:{reservation_id}"
+parameters:
+  - name: reservation_id
+    type: uuid
+    required: true
+```
+
+**Behavior**:
+1. Verify user owns reservation
+2. Check status='CONFIRMED' and now() < pickup_end_time
+3. Show confirmation prompt
+4. On confirm, update status to 'CANCELLED'
+5. Return units to offer.quantity_remaining
+
+**Outputs**:
+```yaml
+success_responses:
+  - type: message_with_inline_keyboard
+    text: |
+      Cancel this reservation?
+      The items will become available for others to reserve.
+    inline_keyboard:
+      - [{"text": "Yes, cancel", "callback_data": "confirm_cancel:{reservation.id}"}]
+      - [{"text": "No, keep it", "callback_data": "action:my_reservations"}]
+    
+  - type: confirmation_message (after cancellation)
+    text: |
+      ❌ Reservation cancelled.
+      The items are now available for others.
+    
+error_responses:
+  - condition: cannot_cancel_after_pickup_time
+    answer_callback_query:
+      text: "Sorry, you can't cancel after the pickup window has ended."
+      show_alert: true
+      
+  - condition: already_cancelled
+    answer_callback_query:
+      text: "This reservation is already cancelled."
+      show_alert: false
+```
+
+---
+
+## Error Handler (Global)
+
+### Catch-All for Unhandled Messages/Callbacks
+
+**Trigger**: Any message or callback not matched by specific handlers  
+**Permissions**: Public  
+**Rate Limit**: 10 requests/minute per user
+
+**Behavior**:
+1. Log unhandled event with context
+2. Send helpful error message to user
+3. Suggest valid commands based on user role
+
+**Outputs**:
+```yaml
+error_responses:
+  - type: message
+    text: |
+      I didn't understand that. Try these commands:
+      {role_specific_command_list}
+      
+      Need help? Use /help
+```
+
+---
+
+## Rate Limiting Behavior (Global)
+
+**Implementation**: Redis-backed sliding window counter  
+**Window**: 60 seconds  
+**Action on Limit Exceeded**:
+
+```yaml
+rate_limit_response:
+  type: answer_callback_query
+  text: "⏱️ Too many requests. Please wait a moment and try again."
+  show_alert: true
+  cache_time: 30
+```
+
+**Logged Event**: `rate_limit.exceeded` with {user_id, command, limit}
+
+---
+
+## Handler Testing Checklist
+
+For each handler, tests must verify:
+
+1. ✅ **Happy path**: Valid input → Expected output
+2. ✅ **Permission denial**: Unauthorized user → Error message
+3. ✅ **Invalid input**: Malformed data → Validation error
+4. ✅ **State consistency**: DB and Redis updated atomically
+5. ✅ **Idempotency**: Duplicate requests handled gracefully
+6. ✅ **Rate limiting**: Excessive requests blocked
+7. ✅ **Error logging**: All errors logged with context
+
+---
+
+**Document Version**: 1.0  
+**Last Updated**: 2025-11-30  
+**Related**: [events.yaml](./events.yaml), [spec.md](../spec.md), [data-model.md](../data-model.md)
