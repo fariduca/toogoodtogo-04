@@ -50,11 +50,12 @@ async def main() -> None:
     db = Database(settings)
     await db.connect()
 
-    # Initialize repositories
-    user_repo = PostgresUserRepository(db._session_factory)
-    business_repo = PostgresBusinessRepository(db._session_factory)
-    offer_repo = PostgresOfferRepository(db._session_factory)
-    reservation_repo = PostgresReservationRepository(db._session_factory)
+    async with db.session() as session:
+        # Initialize repositories
+        user_repo = PostgresUserRepository(session)
+        business_repo = PostgresBusinessRepository(session)
+        offer_repo = PostgresOfferRepository(session)
+        reservation_repo = PostgresReservationRepository(session)
 
     # Initialize Redis-backed services
     redis_locks = RedisLockHelper(settings.redis_url, ttl_seconds=settings.redis_lock_ttl_seconds)
