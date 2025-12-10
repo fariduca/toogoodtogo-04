@@ -1,0 +1,539 @@
+# Event Contracts
+
+**Feature**: 002-ux-flow-implementation  
+**Purpose**: Define internal events for state transitions and auditing  
+**Format**: YAML structured event definitions
+
+---
+
+## Event Schema
+
+All events follow this structure:
+
+```yaml
+event_name:
+  namespace: domain_area
+  version: 1.0
+  description: What this event represents
+  trigger: When this event is emitted
+  payload:
+    - field_name: type (required/optional) - description
+  consumers:
+    - system_component_that_listens
+```
+
+---
+
+## Business Domain Events
+
+### `business.registered`
+
+**Namespace**: `lifecycle`  
+**Version**: 1.0  
+**Description**: New business completed registration and submitted for approval  
+**Trigger**: User completes `/register_business` flow and confirms submission
+
+**Payload**:
+```yaml
+business_id: uuid (required) - Unique business identifier
+owner_id: integer (required) - Telegram user ID of owner
+business_name: string (required) - Business name
+address: object (required) - Full address details
+  street: string
+  city: string
+  postal_code: string
+  country_code: string
+  latitude: float (nullable)
+  longitude: float (nullable)
+verification_status: enum (required) - Always 'PENDING' at registration
+registered_at: timestamp (required) - ISO 8601 UTC timestamp
+```
+
+**Consumers**:
+- Audit logging system (FR-030)
+- Admin notification system (sends approval request to admins)
+- Analytics service
+
+---
+
+### `business.approved`
+
+**Namespace**: `lifecycle`  
+**Version**: 1.0  
+**Description**: Admin approved business for posting offers  
+**Trigger**: Admin action via external tool or command
+
+**Payload**:
+```yaml
+business_id: uuid (required)
+business_name: string (required)
+approved_by: integer (required) - Admin user ID
+approved_at: timestamp (required)
+verification_notes: string (optional) - Admin comments
+```
+
+**Consumers**:
+- Business owner notification (send Telegram message)
+- Audit logging
+- Analytics service
+
+---
+
+### `business.rejected`
+
+**Namespace**: `lifecycle`  
+**Version**: 1.0  
+**Description**: Admin rejected business application  
+**Trigger**: Admin action via external tool
+
+**Payload**:
+```yaml
+business_id: uuid (required)
+business_name: string (required)
+rejected_by: integer (required)
+rejected_at: timestamp (required)
+rejection_reason: string (required) - Why rejected
+```
+
+**Consumers**:
+- Business owner notification (send Telegram message with reason)
+- Audit logging
+
+---
+
+## Offer Domain Events
+
+### `offer.created`
+
+**Namespace**: `offer_posting`  
+**Version**: 1.0  
+**Description**: Business created offer draft (not yet published)  
+**Trigger**: User completes `/newdeal` multi-step form
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+title: string (required)
+description: string (required)
+category: enum (optional)
+price_per_unit: decimal (required)
+currency: string (required)
+quantity_total: integer (required)
+pickup_start_time: timestamp (required)
+pickup_end_time: timestamp (required)
+photo_url: string (optional)
+created_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging (FR-030)
+- Business dashboard (if implemented)
+
+---
+
+### `offer.published`
+
+**Namespace**: `offer_posting`  
+**Version**: 1.0  
+**Description**: Offer became visible to customers (state='ACTIVE')  
+**Trigger**: Business confirms offer publication
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+title: string (required)
+price_per_unit: decimal (required)
+quantity_total: integer (required)
+pickup_end_time: timestamp (required)
+published_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Customer notification system (push notifications to nearby users - future)
+- Analytics service
+
+---
+
+### `offer.paused`
+
+**Namespace**: `offer_management`  
+**Version**: 1.0  
+**Description**: Business paused active offer (temporarily unavailable)  
+**Trigger**: Business taps "Pause" button in `/myoffers`
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+paused_by: integer (required) - User ID who paused
+paused_at: timestamp (required)
+reason: string (optional) - User-provided reason (future enhancement)
+```
+
+**Consumers**:
+- Audit logging
+- Customer UI (update offer cards to show paused status)
+
+---
+
+### `offer.resumed`
+
+**Namespace**: `offer_management`  
+**Version**: 1.0  
+**Description**: Business resumed paused offer (back to ACTIVE)  
+**Trigger**: Business taps "Resume" button
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+resumed_by: integer (required)
+resumed_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Customer UI (offer reappears in browse results)
+
+---
+
+### `offer.expired`
+
+**Namespace**: `offer_lifecycle`  
+**Version**: 1.0  
+**Description**: Offer expired automatically (pickup_end_time reached)  
+**Trigger**: Background expiration job runs every 1 minute
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+expiration_type: enum (required) - 'auto' or 'manual'
+expired_at: timestamp (required)
+pickup_end_time: timestamp (required) - Original end time
+final_quantity_remaining: integer (required) - Units left unsold
+```
+
+**Consumers**:
+- Audit logging
+- Business notification (optional: inform about unsold units)
+- Analytics service (track sell-through rate)
+
+---
+
+### `offer.sold_out`
+
+**Namespace**: `offer_lifecycle`  
+**Version**: 1.0  
+**Description**: Offer sold out (quantity_remaining reached 0)  
+**Trigger**: Purchase confirmation or business edits quantity to 0
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+sold_out_at: timestamp (required)
+total_quantity: integer (required)
+total_purchases: integer (required)
+```
+
+**Consumers**:
+- Audit logging
+- Business notification (success message)
+- Analytics service
+
+---
+
+### `offer.edited`
+
+**Namespace**: `offer_management`  
+**Version**: 1.0  
+**Description**: Business updated offer field (price, quantity, etc.)  
+**Trigger**: Business completes offer edit flow
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+business_id: uuid (required)
+edited_by: integer (required)
+edited_at: timestamp (required)
+field_changed: string (required) - 'price' | 'quantity' | 'description' | 'time_window'
+old_value: string (required)
+new_value: string (required)
+```
+
+**Consumers**:
+- Audit logging
+- Customer UI (live update offer cards with new values)
+
+---
+
+## Reservation Domain Events
+
+### `reservation.confirmed`
+
+**Namespace**: `reservations`  
+**Version**: 1.0  
+**Description**: Customer confirmed reservation for on-site payment  
+**Trigger**: User taps "Reserve" button and confirmation succeeds
+
+**Payload**:
+```yaml
+reservation_id: uuid (required)
+offer_id: uuid (required)
+customer_id: integer (required)
+business_id: uuid (required)
+quantity: integer (required)
+unit_price: decimal (required)
+total_price: decimal (required)
+order_id: string (required) - 12-character unique order ID for pickup
+confirmed_at: timestamp (required)
+pickup_start_time: timestamp (required)
+pickup_end_time: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging (FR-029)
+- Customer notification (send confirmation with order ID and pickup details)
+- Inventory service (decrement quantity_remaining immediately)
+
+---
+
+### `reservation.cancelled`
+
+**Namespace**: `reservations`  
+**Version**: 1.0  
+**Description**: Customer cancelled confirmed reservation before pickup  
+**Trigger**: User taps "Cancel" and confirms in `/my_reservations`
+
+**Payload**:
+```yaml
+reservation_id: uuid (required)
+offer_id: uuid (required)
+customer_id: integer (required)
+quantity: integer (required)
+cancellation_reason: string (optional) - Future: user input
+cancelled_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Inventory service (return units to offer.quantity_remaining)
+- Customer notification (send cancellation confirmation)
+
+---
+
+## Inventory Domain Events
+
+### `inventory.reserved`
+
+**Namespace**: `inventory`  
+**Version**: 1.0  
+**Description**: Units reserved for pending purchase  
+**Trigger**: Purchase reservation succeeds
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+reserved_by_purchase_id: uuid (required)
+quantity_reserved: integer (required)
+old_quantity_remaining: integer (required)
+new_quantity_remaining: integer (required)
+reserved_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Real-time inventory dashboard (if implemented)
+
+---
+
+### `inventory.released`
+
+**Namespace**: `inventory`  
+**Version**: 1.0  
+**Description**: Reserved units returned to available pool  
+**Trigger**: Reservation expires or purchase cancelled
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+related_purchase_id: uuid (required)
+quantity_released: integer (required)
+old_quantity_remaining: integer (required)
+new_quantity_remaining: integer (required)
+reason: enum (required) - 'reservation_expired' | 'purchase_cancelled'
+released_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Customer UI (offer becomes available again)
+
+---
+
+### `inventory.sold`
+
+**Namespace**: `inventory`  
+**Version**: 1.0  
+**Description**: Units confirmed sold via reservation  
+**Trigger**: Reservation confirmation
+
+**Payload**:
+```yaml
+offer_id: uuid (required)
+sold_via_reservation_id: uuid (required)
+quantity_sold: integer (required)
+old_quantity_remaining: integer (required)
+new_quantity_remaining: integer (required)
+sold_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Analytics service (track sales velocity)
+
+---
+
+## Error Domain Events
+
+### `error.reservation_race_condition`
+
+**Namespace**: `errors`  
+**Version**: 1.0  
+**Description**: Customer attempted to purchase but another customer got the last unit  
+**Trigger**: Redis SETNX fails during reservation attempt
+
+**Payload**:
+```yaml
+error_id: uuid (required)
+offer_id: uuid (required)
+customer_id: integer (required)
+attempted_quantity: integer (required)
+available_quantity: integer (required) - Should be < attempted_quantity
+occurred_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging (FR-030)
+- Success criteria tracking (SC-004: <0.1% overselling)
+- Customer UI (show "sold out" error message)
+
+---
+
+### `error.expiration_job_failed`
+
+**Namespace**: `errors`  
+**Version**: 1.0  
+**Description**: Background expiration job encountered error  
+**Trigger**: Exception in expiration service
+
+**Payload**:
+```yaml
+error_id: uuid (required)
+job_run_id: uuid (required) - Unique run identifier
+error_message: string (required)
+offers_processed_before_error: integer (required)
+stack_trace: string (optional)
+occurred_at: timestamp (required)
+```
+
+**Consumers**:
+- Error monitoring
+- Admin alerting (job health check)
+
+---
+
+## Security Domain Events
+
+### `security.permission_denied`
+
+**Namespace**: `security`  
+**Version**: 1.0  
+**Description**: User attempted action without required permissions  
+**Trigger**: Permission check fails in handler
+
+**Payload**:
+```yaml
+user_id: integer (required)
+user_role: enum (required) - 'BUSINESS' | 'CUSTOMER'
+attempted_action: string (required) - e.g., '/newdeal', 'offer:pause:uuid'
+required_permission: string (required) - e.g., 'business_owner', 'offer_owner'
+denied_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging (FR-030)
+- Security monitoring (detect abuse patterns)
+
+---
+
+### `security.rate_limit_exceeded`
+
+**Namespace**: `security`  
+**Version**: 1.0  
+**Description**: User exceeded rate limit for command  
+**Trigger**: Rate limiter blocks request
+
+**Payload**:
+```yaml
+user_id: integer (required)
+command: string (required) - e.g., '/browse', 'offer:buy'
+current_count: integer (required) - Requests in window
+limit: integer (required) - Max allowed requests
+window_seconds: integer (required) - Time window duration
+occurred_at: timestamp (required)
+```
+
+**Consumers**:
+- Audit logging
+- Security monitoring (detect scraping/abuse)
+
+---
+
+## Event Consumption Patterns
+
+### Synchronous Consumers
+
+Events that **must** be processed immediately (blocking):
+
+- `purchase.reserved` → Redis reservation lock
+- `purchase.confirmed` → Inventory decrement
+- `inventory.sold` → Database update
+
+### Asynchronous Consumers
+
+Events that **can** be processed later (non-blocking):
+
+- All audit logging events
+- Analytics events
+- Notification events (Telegram messages can be queued)
+
+### Event Replay
+
+For audit compliance (FR-030), all events are:
+
+- Logged to structured logs (JSON format via structlog)
+- Immutable (never modified after creation)
+- Include full payload context for debugging
+
+---
+
+## Event Testing Checklist
+
+For each event, tests must verify:
+
+1. ✅ **Payload completeness**: All required fields present
+2. ✅ **Type safety**: Field types match schema
+3. ✅ **Consumer invocation**: All registered consumers called
+4. ✅ **Idempotency**: Duplicate events handled gracefully
+5. ✅ **Audit trail**: Event logged with correlation ID
+
+---
+
+**Document Version**: 1.0  
+**Last Updated**: 2025-11-30  
+**Related**: [handlers.yaml](./handlers.yaml), [data-model.md](../data-model.md)
