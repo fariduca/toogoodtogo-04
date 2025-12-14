@@ -47,6 +47,14 @@ class ReservationFlowService:
             offer = await self.offer_repo.get_by_id(offer_id)
             if not offer:
                 return False, "Offer not found", None
+            
+            # Check if offer has expired (T069 - expiration validation)
+            if offer.is_expired:
+                from src.handlers import ERROR_TEMPLATES
+                error_msg = ERROR_TEMPLATES["offer_expired"](
+                    offer.pickup_end_time.strftime("%H:%M")
+                )
+                return False, error_msg, None
 
             # Validate offer is available
             if not offer.available_for_reservation:

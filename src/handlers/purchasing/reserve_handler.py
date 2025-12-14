@@ -249,18 +249,39 @@ async def my_reservations_command(update: Update, context: ContextTypes.DEFAULT_
         if not offer or not business:
             continue
         
-        text += (
+        # Build reservation card
+        card_text = (
             f"**Order ID:** `{reservation.order_id}`\n"
             f"**Deal:** {offer.title}\n"
             f"**Business:** {business.business_name}\n"
             f"**Quantity:** {reservation.quantity}\n"
-            f"**Total:** ${float(reservation.total_price):.2f}\n"
+            f"**Total:** €{float(reservation.total_price):.2f}\n"
             f"**Pickup:** {reservation.pickup_start_time.strftime('%b %d, %H:%M')} - {reservation.pickup_end_time.strftime('%H:%M')}\n"
-            f"**Location:** {business.venue.street_address}, {business.venue.city}\n"
-            f"📞 {business.contact_phone or 'N/A'}\n\n"
+            f"**Location:** {business.street_address}, {business.city}\n"
+            f"📞 {business.contact_phone or 'N/A'}\n"
         )
+        
+        # Add cancel button only if pickup_end_time hasn't passed
+        from datetime import datetime
+        now = datetime.utcnow()
+        keyboard = []
+        
+        if now < reservation.pickup_end_time:
+            keyboard.append([
+                InlineKeyboardButton("🗑️ Cancel Reservation", callback_data=f"cancel_reservation:{reservation.id}")
+            ])
+        
+        if keyboard:
+            from telegram import InlineKeyboardMarkup
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(card_text, parse_mode="Markdown", reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(card_text, parse_mode="Markdown")
+        
+        text = ""  # Clear text since we're sending individual cards
     
-    await update.message.reply_text(text, parse_mode="Markdown")
+    if text:  # If there's remaining text (shouldn't happen with new logic)
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 
 async def handle_my_reservations_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

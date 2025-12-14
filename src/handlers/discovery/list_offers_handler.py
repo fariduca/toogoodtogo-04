@@ -104,28 +104,64 @@ async def view_offer_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     offer_id = callback_data.split(":", 1)[1]
 
     try:
+        from uuid import UUID
+        from src.storage.postgres_business_repo import PostgresBusinessRepository
+        
         repo: PostgresOfferRepository = context.bot_data.get("offer_repo")
-        # TODO: Get offer by ID
-        # offer = await repo.get_by_id(offer_id)
+        business_repo: PostgresBusinessRepository = context.bot_data.get("business_repo")
+        
+        offer = await repo.get_by_id(UUID(offer_id))
 
-        # if not offer or offer.status != OfferStatus.ACTIVE:
-        #     await query.edit_message_text("❌ This offer is no longer available.")
-        #     return
+        if not offer:
+            await query.edit_message_text("❌ This offer is no longer available.")
+            return
+        
+        # Get business details
+        business = await business_repo.get_by_id(offer.business_id)
+        
+        # Status indicators
+        status_indicator = ""
+        if offer.state == OfferStatus.PAUSED:
+            status_indicator = "⏸️ **PAUSED** - Not currently available\n\n"
+        elif offer.state == OfferStatus.SOLD_OUT:
+            status_indicator = "🔴 **SOLD OUT**\n\n"
+        elif offer.state == OfferStatus.EXPIRED:
+            status_indicator = "⏰ **EXPIRED**\n\n"
+        elif offer.state == OfferStatus.EXPIRED_EARLY:
+            status_indicator = "🛑 **ENDED**\n\n"
+        elif offer.is_expired:
+            status_indicator = "⏰ **EXPIRED**\n\n"
 
         # Format offer details
-        # Placeholder response
         message_text = (
-            f"📦 **Offer Details**\n\n"
-            f"Offer ID: {offer_id}\n\n"
-            f"Use /purchase {offer_id} to buy items from this offer.\n\n"
-            "Database query implementation pending."
+            f"{status_indicator}"
+            f"📦 **{offer.title}**\n\n"
+            f"{offer.description}\n\n"
+            f"💰 €{offer.price_per_unit} per unit\n"
+            f"📦 {offer.quantity_remaining}/{offer.quantity_total} units available\n"
+            f"⏰ Pickup: {offer.pickup_start_time.strftime('%H:%M')} - "
+            f"{offer.pickup_end_time.strftime('%H:%M')}\n"
         )
+        
+        if business:
+            message_text += (
+                f"\n🏪 **{business.business_name}**\n"
+                f"📍 {business.street_address}, {business.city}\n"
+            )
 
-        # Create purchase button
-        keyboard = [
-            [InlineKeyboardButton("🛒 Purchase", callback_data=f"purchase:{offer_id}")],
-            [InlineKeyboardButton("« Back to List", callback_data="back_to_offers")],
-        ]
+        # Create buttons based on offer state
+        keyboard = []
+        
+        # Only show Reserve button if offer is available
+        if offer.available_for_reservation:
+            keyboard.append([
+                InlineKeyboardButton("🛒 Reserve", callback_data=f"reserve:{offer_id}")
+            ])
+        
+        keyboard.append([
+            InlineKeyboardButton("« Back to List", callback_data="back_to_offers")
+        ])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(

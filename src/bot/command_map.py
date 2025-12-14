@@ -30,10 +30,13 @@ from src.handlers.offer_posting.offer_publish_handler import get_publish_handler
 # TODO: Migrate purchase_cancel_handler to use reservation system
 # from src.handlers.purchasing.purchase_cancel_handler import get_cancellation_handler
 from src.handlers.purchasing.reserve_handler import get_reservation_handlers
+from src.handlers.offer_management.list_offers_handler import get_myoffers_handler
 from src.handlers.system.start_handler import (
     get_default_message_handler,
     get_start_handler,
 )
+from src.handlers.system.help_handler import get_help_handler
+from src.handlers.system.settings_handler import get_settings_handler
 from src.logging import get_logger
 
 logger = get_logger(__name__)
@@ -49,6 +52,13 @@ def register_handlers(app: Application) -> None:
     # System handlers - startup and fallback
     app.add_handler(get_start_handler())
     logger.info("handler_registered", handler="start")
+    
+    # Global commands (Phase 7)
+    app.add_handler(get_help_handler())
+    logger.info("handler_registered", handler="help")
+    
+    app.add_handler(get_settings_handler())
+    logger.info("handler_registered", handler="settings")
     
     # Registration conversation flow (Phase 2)
     app.add_handler(get_registration_conversation_handler())
@@ -110,6 +120,10 @@ def register_handlers(app: Application) -> None:
 
     app.add_handler(get_edit_handler())
     logger.info("handler_registered", handler="offer_edit")
+    
+    # My offers command (Phase 5)
+    app.add_handler(get_myoffers_handler())
+    logger.info("handler_registered", handler="myoffers")
 
     # Callback query handlers for inline buttons
     register_callback_handlers(app)
