@@ -38,13 +38,13 @@ class PostgresBusinessRepository(RepositoryBase[Business]):
         db_business = BusinessTable(
             owner_id=entity.owner_id,
             business_name=entity.business_name,
-            street_address=entity.venue.street_address,
-            city=entity.venue.city,
-            postal_code=entity.venue.postal_code,
-            country_code=entity.venue.country_code,
-            latitude=entity.venue.latitude,
-            longitude=entity.venue.longitude,
-            contact_phone=entity.contact_phone,
+            street_address=entity.street_address,
+            city=entity.city,
+            postal_code=entity.postal_code,
+            country_code=entity.country_code,
+            latitude=entity.latitude,
+            longitude=entity.longitude,
+            contact_phone=entity.phone,
             logo_url=entity.logo_url,
         )
 
