@@ -56,7 +56,6 @@ specs/
 
 # Development files
 .pre-commit-config.yaml
-alembic.ini
 docker-compose.yml
 Dockerfile*
 .dockerignore
