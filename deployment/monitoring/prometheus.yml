@@ -1,0 +1,86 @@
+# TooGoodToGo Prometheus Configuration
+# Collects metrics from bot application and infrastructure
+#
+# Usage: Referenced by monitoring/docker-compose.monitoring.yml
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'toogoodtogo'
+    environment: 'production'
+
+# Alerting configuration (optional - configure with Alertmanager)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# Rule files (for alerting rules)
+rule_files:
+  # - "alerts/*.yml"
+
+# Scrape configurations
+scrape_configs:
+  # =============================================================================
+  # Prometheus Self-Monitoring
+  # =============================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: /metrics
+
+  # =============================================================================
+  # TooGoodToGo Bot Application
+  # =============================================================================
+  - job_name: 'toogoodtogo-bot'
+    static_configs:
+      - targets: ['bot:8000']
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    # Bot may not have /metrics endpoint - use health check instead
+    # metric_relabel_configs can transform health JSON to metrics if needed
+
+  # Alternative: Health endpoint as custom target
+  - job_name: 'toogoodtogo-health'
+    static_configs:
+      - targets: ['bot:8000']
+    metrics_path: /health
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    # This will fail until bot exposes Prometheus metrics format
+    # Keep for future implementation
+
+  # =============================================================================
+  # Docker Containers (via cAdvisor if deployed)
+  # =============================================================================
+  # - job_name: 'cadvisor'
+  #   static_configs:
+  #     - targets: ['cadvisor:8080']
+  #   metrics_path: /metrics
+
+  # =============================================================================
+  # Node Exporter (if deployed for host metrics)
+  # =============================================================================
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']
+  #   metrics_path: /metrics
+
+  # =============================================================================
+  # PostgreSQL Exporter (if deployed)
+  # =============================================================================
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+  #   metrics_path: /metrics
+
+  # =============================================================================
+  # Redis Exporter (if deployed)
+  # =============================================================================
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+  #   metrics_path: /metrics

@@ -1,0 +1,33 @@
+[Unit]
+Description=TooGoodToGo Database Backup Service
+Documentation=https://github.com/toogoodtogo/toogoodtogo
+After=toogoodtogo.service
+Requires=toogoodtogo.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/toogoodtogo/deployment
+Environment=DEPLOY_DIR=/opt/toogoodtogo
+Environment=BACKUP_DIR=/opt/backups/postgres
+Environment=DOCKER_COMPOSE_FILE=docker-compose.prod.yml
+
+# Load environment from production env file
+EnvironmentFile=-/opt/toogoodtogo/deployment/.env.production
+
+# Backup command
+ExecStart=/opt/toogoodtogo/deployment/scripts/backup.sh scheduled
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=toogoodtogo-backup
+
+# Timeout for backup operation
+TimeoutStartSec=600
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

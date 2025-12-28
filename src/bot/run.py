@@ -23,6 +23,7 @@ from telegram.ext import Application
 
 from src.bot.command_map import register_handlers
 from src.config import load_settings
+from src.handlers.system.health import start_health_server
 from src.logging import get_logger, setup_logging
 from src.security.permissions import PermissionChecker
 from src.security.rate_limit import RateLimiter
@@ -125,6 +126,18 @@ async def main() -> None:
 
     logger.info("Bot initialization complete, starting polling")
 
+    # Start health check HTTP server in background thread
+    health_server = start_health_server(
+        host="0.0.0.0",
+        port=8000,
+        db=db,
+        redis_url=settings.redis_url,
+    )
+    import threading
+    health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+    health_thread.start()
+    logger.info("Health check server started on port 8000")
+
     # Start the bot
     await application.initialize()
     await application.start()
@@ -139,6 +152,9 @@ async def main() -> None:
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down bot")
     finally:
+        # Shutdown health server
+        health_server.shutdown()
+        logger.info("Health check server stopped")
         await scheduler.stop()
         scheduler_task.cancel()
         await rate_limiter.disconnect()

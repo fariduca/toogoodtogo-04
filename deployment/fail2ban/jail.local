@@ -1,0 +1,88 @@
+# TooGoodToGo Fail2ban Configuration
+# SSH brute-force protection for DigitalOcean droplet
+#
+# Installation: Copy to /etc/fail2ban/jail.local
+# Restart: systemctl restart fail2ban
+
+[DEFAULT]
+# Ban duration (1 hour default)
+bantime = 1h
+
+# Time window for counting failures
+findtime = 10m
+
+# Number of failures before ban
+maxretry = 5
+
+# Email notifications (uncomment and configure if needed)
+# destemail = admin@yourdomain.com
+# sender = fail2ban@yourdomain.com
+# mta = sendmail
+# action = %(action_mwl)s
+
+# Use iptables for banning (default on Ubuntu)
+banaction = iptables-multiport
+banaction_allports = iptables-allports
+
+# =============================================================================
+# SSH Protection
+# =============================================================================
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 1h
+findtime = 10m
+
+# Aggressive mode for repeated offenders
+[sshd-aggressive]
+enabled = true
+port = ssh
+filter = sshd[mode=aggressive]
+logpath = /var/log/auth.log
+maxretry = 2
+bantime = 24h
+findtime = 1h
+
+# =============================================================================
+# nginx Protection (Optional)
+# =============================================================================
+[nginx-http-auth]
+enabled = false
+port = http,https
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 3
+bantime = 1h
+
+[nginx-limit-req]
+enabled = false
+port = http,https
+filter = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+bantime = 1h
+findtime = 1m
+
+[nginx-botsearch]
+enabled = false
+port = http,https
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 2
+bantime = 1d
+
+# =============================================================================
+# Additional Services (Optional)
+# =============================================================================
+
+# Block repeated bad bots/scanners
+[recidive]
+enabled = true
+logpath = /var/log/fail2ban.log
+banaction = %(banaction_allports)s
+bantime = 1w
+findtime = 1d
+maxretry = 5

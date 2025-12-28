@@ -1,0 +1,20 @@
+[Unit]
+Description=TooGoodToGo Daily Database Backup Timer
+Documentation=https://github.com/toogoodtogo/toogoodtogo
+Requires=toogoodtogo.service
+
+[Timer]
+# Run daily at 3:00 AM server time
+OnCalendar=*-*-* 03:00:00
+
+# Randomize start time by up to 10 minutes to avoid exact timing
+RandomizedDelaySec=600
+
+# Ensure timer persists across reboots
+Persistent=true
+
+# Wait for system to be fully booted
+OnBootSec=15min
+
+[Install]
+WantedBy=timers.target

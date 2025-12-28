@@ -1,0 +1,19 @@
+# Grafana Dashboard Provisioning Configuration
+# Auto-loads dashboards from the dashboards directory
+#
+# This file is mounted to /etc/grafana/provisioning/dashboards/
+
+apiVersion: 1
+
+providers:
+  - name: 'TooGoodToGo Dashboards'
+    orgId: 1
+    folder: ''
+    folderUid: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
