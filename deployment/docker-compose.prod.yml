@@ -87,15 +87,16 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL}
-      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Map production env vars to what the app expects
+      - BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY}
       - STRIPE_API_KEY=${STRIPE_API_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - SENTRY_DSN=${SENTRY_DSN:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=production
       - APP_VERSION=${APP_VERSION:-latest}
     depends_on:
       postgres:
