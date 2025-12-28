@@ -1,0 +1,228 @@
+# TooGoodToGo Production Deployment Workflow
+# Deploys tagged releases to DigitalOcean droplet via SSH
+#
+# Triggers:
+#   - Manual dispatch with version input
+#   - Automatically on version tag push (v*.*.*)
+#
+# Required Secrets:
+#   - DO_DROPLET_IP: DigitalOcean droplet IP address
+#   - DO_SSH_PRIVATE_KEY: SSH private key for deployment
+#   - DO_SSH_USER: SSH user (default: deploy)
+#   - TELEGRAM_BOT_TOKEN: Telegram bot token (for smoke test)
+
+name: Deploy to Production
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy (e.g., v1.0.0)'
+        required: true
+        type: string
+      skip_backup:
+        description: 'Skip pre-deployment backup'
+        required: false
+        type: boolean
+        default: false
+      skip_migration:
+        description: 'Skip database migrations'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  SSH_USER: ${{ secrets.DO_SSH_USER || 'deploy' }}
+  DEPLOY_DIR: /opt/toogoodtogo
+
+jobs:
+  # =============================================================================
+  # Pre-deployment Validation
+  # =============================================================================
+  validate:
+    name: Validate Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Determine Version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          
+          # Validate semver format
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION (expected v*.*.* format)"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Deploying version: $VERSION"
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.version }}
+
+      - name: Run Tests
+        run: |
+          echo "::group::Running pre-deployment tests"
+          # Verify critical files exist
+          test -f "Dockerfile" || { echo "::error::Dockerfile not found"; exit 1; }
+          test -f "pyproject.toml" || { echo "::error::pyproject.toml not found"; exit 1; }
+          test -f "deployment/docker-compose.prod.yml" || { echo "::error::docker-compose.prod.yml not found"; exit 1; }
+          echo "All required files present"
+          echo "::endgroup::"
+
+  # =============================================================================
+  # Deploy to Production
+  # =============================================================================
+  deploy:
+    name: Deploy to DigitalOcean
+    runs-on: ubuntu-latest
+    needs: validate
+    environment:
+      name: production
+      url: https://${{ secrets.DO_DROPLET_IP || 'production' }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
+
+      - name: Add Host Key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.DO_DROPLET_IP }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Validate SSH Connection
+        run: |
+          ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new \
+            ${{ env.SSH_USER }}@${{ secrets.DO_DROPLET_IP }} \
+            "echo 'SSH connection successful'"
+
+      - name: Deploy Application
+        id: deploy
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          
+          # Build deploy command
+          DEPLOY_CMD="${{ env.DEPLOY_DIR }}/deployment/scripts/deploy.sh $VERSION"
+          
+          if [[ "${{ inputs.skip_backup }}" == "true" ]]; then
+            DEPLOY_CMD="$DEPLOY_CMD --skip-backup"
+          fi
+          
+          if [[ "${{ inputs.skip_migration }}" == "true" ]]; then
+            DEPLOY_CMD="$DEPLOY_CMD --skip-migration"
+          fi
+          
+          echo "::group::Running deployment"
+          echo "Command: $DEPLOY_CMD"
+          
+          ssh ${{ env.SSH_USER }}@${{ secrets.DO_DROPLET_IP }} "$DEPLOY_CMD"
+          
+          DEPLOY_EXIT=$?
+          echo "::endgroup::"
+          
+          if [[ $DEPLOY_EXIT -eq 0 ]]; then
+            echo "deployment_status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployment_status=failed" >> "$GITHUB_OUTPUT"
+            exit $DEPLOY_EXIT
+          fi
+
+      - name: Health Check
+        if: success()
+        run: |
+          echo "::group::Running health check"
+          ssh ${{ env.SSH_USER }}@${{ secrets.DO_DROPLET_IP }} \
+            "${{ env.DEPLOY_DIR }}/deployment/scripts/health-check.sh --json"
+          echo "::endgroup::"
+
+      - name: Get Deployment Status
+        if: always()
+        id: status
+        run: |
+          ssh ${{ env.SSH_USER }}@${{ secrets.DO_DROPLET_IP }} \
+            "docker compose -f ${{ env.DEPLOY_DIR }}/deployment/docker-compose.prod.yml ps" || true
+
+  # =============================================================================
+  # Notification
+  # =============================================================================
+  notify:
+    name: Send Notification
+    runs-on: ubuntu-latest
+    needs: [validate, deploy]
+    if: always()
+    
+    steps:
+      - name: Determine Status
+        id: status
+        run: |
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "status=✅ Success" >> "$GITHUB_OUTPUT"
+            echo "color=good" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ needs.deploy.result }}" == "failure" ]]; then
+            echo "status=❌ Failed" >> "$GITHUB_OUTPUT"
+            echo "color=danger" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=⚠️ Cancelled" >> "$GITHUB_OUTPUT"
+            echo "color=warning" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Summary
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          STATUS="${{ steps.status.outputs.status }}"
+          
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`$VERSION\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | Production |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.deploy.result }}" == "failure" ]]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The deployment has been automatically rolled back." >> $GITHUB_STEP_SUMMARY
+            echo "Check the deploy job logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # Optional: Slack notification (uncomment if Slack webhook is configured)
+      # - name: Slack Notification
+      #   if: always()
+      #   uses: 8398a7/action-slack@v3
+      #   with:
+      #     status: custom
+      #     fields: repo,message,commit,author
+      #     custom_payload: |
+      #       {
+      #         "attachments": [{
+      #           "color": "${{ steps.status.outputs.color }}",
+      #           "title": "Deployment ${{ steps.status.outputs.status }}",
+      #           "text": "Version ${{ needs.validate.outputs.version }} deployed to production",
+      #           "fields": [
+      #             { "title": "Repository", "short": true, "value": "${{ github.repository }}" },
+      #             { "title": "Actor", "short": true, "value": "${{ github.actor }}" }
+      #           ]
+      #         }]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

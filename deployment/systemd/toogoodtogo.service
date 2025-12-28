@@ -1,0 +1,43 @@
+[Unit]
+Description=TooGoodToGo Telegram Bot Application
+Documentation=https://github.com/toogoodtogo/toogoodtogo
+After=docker.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/toogoodtogo/deployment
+Environment=DEPLOY_DIR=/opt/toogoodtogo
+Environment=DOCKER_COMPOSE_FILE=docker-compose.prod.yml
+
+# Load environment from production env file
+EnvironmentFile=-/opt/toogoodtogo/deployment/.env.production
+
+# Start command
+ExecStartPre=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} pull --quiet
+ExecStart=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} up --remove-orphans
+ExecStop=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} down
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Resource limits
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=toogoodtogo
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/toogoodtogo /var/log/toogoodtogo /opt/backups/postgres
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

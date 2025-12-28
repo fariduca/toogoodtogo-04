@@ -1,0 +1,31 @@
+# SSL Configuration Template for TooGoodToGo
+# Modern TLS settings following Mozilla SSL Configuration Generator (Intermediate)
+# https://ssl-config.mozilla.org/
+#
+# This file is included by nginx.conf
+# Update certificate paths after running certbot
+
+# SSL protocols and ciphers
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+
+# SSL session settings
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:50m;
+ssl_session_tickets off;
+
+# OCSP Stapling
+ssl_stapling on;
+ssl_stapling_verify on;
+
+# Diffie-Hellman parameter (generate with: openssl dhparam -out /etc/nginx/ssl/dhparam.pem 4096)
+# Uncomment after generating:
+# ssl_dhparam /etc/nginx/ssl/dhparam.pem;
+
+# HSTS (enable after confirming SSL works - uncomment in production)
+# add_header Strict-Transport-Security "max-age=63072000" always;
+
+# DNS resolver for OCSP stapling (Cloudflare DNS)
+resolver 1.1.1.1 1.0.0.1 valid=300s;
+resolver_timeout 5s;

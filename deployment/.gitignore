@@ -1,0 +1,40 @@
+# Deployment Secrets - NEVER commit these
+.env.production
+.env.local
+*.env
+
+# SSL certificates and keys
+nginx/ssl/
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files (stored on server, not in repo)
+backups/
+*.sql
+*.sql.gz
+*.dump
+
+# Runtime logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Docker volumes data (managed by Docker, not git)
+postgres-data/
+redis-data/
+
+# Secrets that might be generated
+secrets/
+*.secret
