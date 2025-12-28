@@ -9,7 +9,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/toogoodtogo/deployment
 Environment=DEPLOY_DIR=/opt/toogoodtogo
-Environment=DOCKER_COMPOSE_FILE=docker-compose.prod.yml
+Environment=DOCKER_COMPOSE_FILE=/opt/toogoodtogo/deployment/docker-compose.prod.yml
 
 # Load environment from production env file
 EnvironmentFile=-/opt/toogoodtogo/deployment/.env.production
