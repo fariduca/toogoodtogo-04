@@ -120,15 +120,15 @@
 
 ### Implementation
 
-- [ ] T049 [P] [US3] Implement /myoffers command in src/handlers/offer_management/list_offers_handler.py showing business's offers with status and management buttons
-- [ ] T050 [P] [US3] Implement pause offer handler in src/handlers/offer_management/pause_offer_handler.py to set state=PAUSED
-- [ ] T051 [P] [US3] Implement resume offer handler in src/handlers/offer_management/resume_offer_handler.py to set state=ACTIVE
-- [ ] T052 [P] [US3] Implement edit offer handler in src/handlers/offer_management/edit_offer_handler.py for price/quantity/description/time updates
-- [ ] T053 [P] [US3] Implement end offer handler in src/handlers/offer_management/end_offer_handler.py to set state=EXPIRED_EARLY with confirmation prompt
-- [ ] T054 [P] [US3] Add sold-out detection in src/services/sold_out_transition.py to auto-set state=SOLD_OUT when quantity_remaining=0
-- [ ] T055 [US3] Update offer detail view in src/handlers/discovery/offer_detail_handler.py to show paused/sold-out indicators and disable Reserve button
-- [ ] T056 [US3] Register /myoffers in src/bot/command_map.py with business scope
-- [ ] T057 [US3] Register offer management callbacks (pause/resume/edit/end) in src/bot/callback_map.py
+- [X] T049 [P] [US3] Implement /myoffers command in src/handlers/offer_management/list_offers_handler.py showing business's offers with status and management buttons
+- [X] T050 [P] [US3] Implement pause offer handler in src/handlers/offer_management/pause_offer_handler.py to set state=PAUSED
+- [X] T051 [P] [US3] Implement resume offer handler in src/handlers/offer_management/resume_offer_handler.py to set state=ACTIVE
+- [X] T052 [P] [US3] Implement edit offer handler in src/handlers/offer_management/edit_offer_handler.py for price/quantity/description/time updates
+- [X] T053 [P] [US3] Implement end offer handler in src/handlers/offer_management/end_offer_handler.py to set state=EXPIRED_EARLY with confirmation prompt
+- [X] T054 [P] [US3] Add sold-out detection in src/services/sold_out_transition.py to auto-set state=SOLD_OUT when quantity_remaining=0
+- [X] T055 [US3] Update offer detail view in src/handlers/discovery/offer_detail_handler.py to show paused/sold-out indicators and disable Reserve button
+- [X] T056 [US3] Register /myoffers in src/bot/command_map.py with business scope
+- [X] T057 [US3] Register offer management callbacks (pause/resume/edit/end) in src/bot/callback_map.py
 
 ---
 
@@ -140,11 +140,11 @@
 
 ### Implementation
 
-- [ ] T058 [P] [US5] Implement cancel reservation handler in src/handlers/purchasing/cancel_reservation_handler.py with time validation (only before pickup_end_time)
-- [ ] T059 [P] [US5] Add cancellation confirmation prompt in src/handlers/purchasing/cancel_reservation_handler.py: "Cancel this reservation? Items will become available for others"
-- [ ] T060 [US5] Update ReservationRepository in src/storage/postgres_reservation_repo.py with cancel method to set status=CANCELLED and return units to inventory
-- [ ] T061 [US5] Update /my_reservations view to hide Cancel button after pickup_end_time in src/handlers/purchasing/my_reservations_handler.py
-- [ ] T062 [US5] Register cancellation callback in src/bot/callback_map.py
+- [X] T058 [P] [US5] Implement cancel reservation handler in src/handlers/purchasing/cancel_reservation_handler.py with time validation (only before pickup_end_time)
+- [X] T059 [P] [US5] Add cancellation confirmation prompt in src/handlers/purchasing/cancel_reservation_handler.py: "Cancel this reservation? Items will become available for others"
+- [X] T060 [US5] Update ReservationRepository in src/storage/postgres_reservation_repo.py with cancel method to set status=CANCELLED and return units to inventory
+- [X] T061 [US5] Update /my_reservations view to hide Cancel button after pickup_end_time in src/handlers/purchasing/my_reservations_handler.py
+- [X] T062 [US5] Register cancellation callback in src/bot/callback_map.py
 
 ---
 
@@ -155,11 +155,11 @@
 
 ### Implementation
 
-- [ ] T063 [P] Implement /help command in src/handlers/system/help_handler.py with role-specific feature explanations (business vs customer)
-- [ ] T064 [P] Implement /settings command in src/handlers/system/settings_handler.py for language and notification preferences
-- [ ] T065 [P] Configure Telegram menu button in src/bot/run.py with role-appropriate commands (businesses: "New deal", "My offers"; customers: "Browse deals", "My reservations")
-- [ ] T066 [P] Implement deep linking handler in src/handlers/system/start_handler.py for offer_<offer_id> and business_invite_<token> parameters
-- [ ] T067 Register global commands (/start, /help, /settings) in src/bot/command_map.py for all users
+- [X] T063 [P] Implement /help command in src/handlers/system/help_handler.py with role-specific feature explanations (business vs customer)
+- [X] T064 [P] Implement /settings command in src/handlers/system/settings_handler.py for language and notification preferences
+- [X] T065 [P] Configure Telegram menu button in src/bot/run.py with role-appropriate commands (businesses: "New deal", "My offers"; customers: "Browse deals", "My reservations")
+- [X] T066 [P] Implement deep linking handler in src/handlers/system/start_handler.py for offer_<offer_id> and business_invite_<token> parameters
+- [X] T067 Register global commands (/start, /help, /settings) in src/bot/command_map.py for all users
 
 ---
 
@@ -170,17 +170,17 @@
 
 ### Implementation
 
-- [ ] T068 [P] Implement error message formatter in src/handlers/__init__.py following pattern: [emoji] [problem] [action]
-- [ ] T069 [P] Add offer expiration validation before reservation in src/services/reservation_flow.py with message "This offer expired at [time]"
-- [ ] T070 [P] Add offer state validation before operations in src/handlers/offer_management/ to prevent actions on expired/sold-out offers
-- [ ] T071 [P] Implement structured event logging in src/logging/audit.py for offer lifecycle, reservation lifecycle, inventory changes, errors per FR-029
-- [ ] T072 [P] Add rate limiting to all command handlers using RateLimitService with 10 req/60s default
-- [ ] T073 [P] Add permission checks to business commands using PermissionService to verify ownership
-- [ ] T074 [P] Update all handlers to use asyncio patterns consistently (async/await, proper context managers)
-- [ ] T075 [P] Add health check endpoint for monitoring (optional, future enhancement)
-- [ ] T076 Integrate all handlers into bot startup in src/bot/run.py ensuring scheduler starts before bot polling
-- [ ] T077 Run final linting and type checking: ruff check src/ && mypy src/
-- [ ] T078 Verify all FR-001 through FR-029 are implemented per spec.md
+- [X] T068 [P] Implement error message formatter in src/handlers/__init__.py following pattern: [emoji] [problem] [action]
+- [X] T069 [P] Add offer expiration validation before reservation in src/services/reservation_flow.py with message "This offer expired at [time]"
+- [X] T070 [P] Add offer state validation before operations in src/handlers/offer_management/ to prevent actions on expired/sold-out offers
+- [X] T071 [P] Implement structured event logging in src/logging/audit.py for offer lifecycle, reservation lifecycle, inventory changes, errors per FR-029
+- [X] T072 [P] Add rate limiting to all command handlers using RateLimitService with 10 req/60s default
+- [X] T073 [P] Add permission checks to business commands using PermissionService to verify ownership
+- [X] T074 [P] Update all handlers to use asyncio patterns consistently (async/await, proper context managers)
+- [X] T075 [P] Add health check endpoint for monitoring (optional, future enhancement)
+- [X] T076 Integrate all handlers into bot startup in src/bot/run.py ensuring scheduler starts before bot polling
+- [X] T077 Run final linting and type checking: ruff check src/ && mypy src/
+- [X] T078 Verify all FR-001 through FR-029 are implemented per spec.md
 
 ---
 
@@ -281,15 +281,15 @@ Add **lifecycle management** and **cancellation**:
 
 Before marking feature complete:
 
-- [ ] All 29 functional requirements (FR-001 to FR-029) implemented
-- [ ] All 5 user stories have independent test criteria passing
-- [ ] 10 success criteria from spec.md validated
-- [ ] All handlers registered in command_map.py and callback_map.py
-- [ ] Scheduler running with 60-second expiration checks
-- [ ] Redis locks preventing race conditions (verified via integration test)
-- [ ] Structured logging capturing all events per FR-029
-- [ ] Rate limiting active on all commands
-- [ ] Permission checks enforced for business-only actions
-- [ ] Error messages follow [emoji] [problem] [action] pattern
-- [ ] Constitution principles satisfied (event-driven, test-first, secure)
+- [X] All 29 functional requirements (FR-001 to FR-029) implemented
+- [X] All 5 user stories have independent test criteria passing
+- [X] 10 success criteria from spec.md validated
+- [X] All handlers registered in command_map.py and callback_map.py
+- [X] Scheduler running with 60-second expiration checks
+- [X] Redis locks preventing race conditions (verified via integration test)
+- [X] Structured logging capturing all events per FR-029
+- [X] Rate limiting active on all commands
+- [X] Permission checks enforced for business-only actions
+- [X] Error messages follow [emoji] [problem] [action] pattern
+- [X] Constitution principles satisfied (event-driven, test-first, secure)
 

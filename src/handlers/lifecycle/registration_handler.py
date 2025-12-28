@@ -178,7 +178,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         street_address=context.user_data["street_address"],
         city=context.user_data["city"],
         postal_code=context.user_data["postal_code"],
-        country_code="US",  # Default, can be enhanced later
+        country_code="TJ",  # Default, can be enhanced later
     )
     
     business = await business_repo.create(business_input)

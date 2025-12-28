@@ -38,6 +38,29 @@ from src.storage.postgres_user_repo import PostgresUserRepository
 from src.storage.redis_locks import RedisLockHelper
 
 
+async def setup_bot_menu(application: Application) -> None:
+    """Configure role-appropriate bot menu commands."""
+    from telegram import BotCommand
+    
+    # Set default commands for all users
+    # Note: Telegram doesn't support dynamic per-user menus, so we set a general menu
+    # that includes both business and customer commands
+    commands = [
+        BotCommand("start", "Start or restart the bot"),
+        BotCommand("help", "Show help and commands"),
+        BotCommand("browse", "Browse available deals"),
+        BotCommand("myreservations", "View your reservations"),
+        BotCommand("newdeal", "Post a new deal (businesses only)"),
+        BotCommand("myoffers", "Manage your offers (businesses only)"),
+        BotCommand("settings", "Manage your settings"),
+    ]
+    
+    await application.bot.set_my_commands(commands)
+    
+    logger = get_logger(__name__)
+    logger.info("bot_menu_configured", command_count=len(commands))
+
+
 async def main() -> None:
     """Initialize and start the Telegram bot."""
     settings = load_settings()
@@ -96,6 +119,9 @@ async def main() -> None:
 
     # Register handlers
     register_handlers(application)
+    
+    # Configure bot menu
+    await setup_bot_menu(application)
 
     logger.info("Bot initialization complete, starting polling")
 
