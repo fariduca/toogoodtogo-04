@@ -225,6 +225,10 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
 
         return [self._to_domain_model(db_offer) for db_offer in db_offers]
 
+    async def get_by_business_id(self, business_id: UUID) -> list[Offer]:
+        """Get all offers for a business (alias for get_offers_by_business)."""
+        return await self.get_offers_by_business(business_id)
+
     def _to_domain_model(self, db_offer: OfferTable) -> Offer:
         """Convert database model to domain model."""
         return Offer(
