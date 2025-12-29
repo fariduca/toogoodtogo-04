@@ -19,6 +19,8 @@ ROLE_SELECTION, BUSINESS_NAME, STREET_ADDRESS, CITY, POSTAL_CODE, PHONE = range(
 async def handle_role_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle role selection from /start command."""
     if not context.user_data.get("awaiting_role_selection"):
+        # Not in registration flow - don't handle this message
+        # Returning None allows other handlers to process it
         return ConversationHandler.END
     
     user_repo: PostgresUserRepository = context.bot_data["user_repo"]
@@ -219,11 +221,29 @@ async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def get_registration_conversation_handler() -> ConversationHandler:
-    """Create and return registration conversation handler."""
+    """Create and return registration conversation handler.
+    
+    Note: This handler uses per_message=False (default) which means it tracks
+    conversations per user. The entry point filter checks for 'awaiting_role_selection'
+    flag set by /start command to avoid catching unrelated messages.
+    """
+    # Define a custom filter that only matches when user is awaiting role selection
+    class AwaitingRoleFilter(filters.MessageFilter):
+        def filter(self, message) -> bool:
+            # We can't access context here, so we rely on the text patterns
+            # that are expected for role selection
+            if message.text:
+                text = message.text.strip()
+                return ("Business" in text or "🏪" in text or 
+                        "Customer" in text or "🛍️" in text)
+            return False
+    
+    awaiting_role_filter = AwaitingRoleFilter()
+    
     return ConversationHandler(
         entry_points=[
             MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
+                awaiting_role_filter & filters.TEXT & ~filters.COMMAND,
                 handle_role_selection,
             )
         ],

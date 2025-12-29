@@ -109,7 +109,7 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
                 f"🎉 Great news! Your business '{business.business_name}' has been approved!\n\n"
                 "You can now start posting deals:\n"
                 "• /newdeal — Create your first deal\n"
-                "• /mydeals — Manage your deals\n\n"
+                "• /myoffers — Manage your offers\n\n"
                 "Welcome to TooGoodToGo! 🚀"
             )
             
