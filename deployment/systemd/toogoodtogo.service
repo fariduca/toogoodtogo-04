@@ -1,12 +1,13 @@
 [Unit]
 Description=TooGoodToGo Telegram Bot Application
 Documentation=https://github.com/toogoodtogo/toogoodtogo
-After=docker.service
+After=docker.service network-online.target
 Requires=docker.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=oneshot
+RemainAfterExit=yes
 WorkingDirectory=/opt/toogoodtogo/deployment
 Environment=DEPLOY_DIR=/opt/toogoodtogo
 Environment=DOCKER_COMPOSE_FILE=/opt/toogoodtogo/deployment/docker-compose.prod.yml
@@ -14,18 +15,21 @@ Environment=DOCKER_COMPOSE_FILE=/opt/toogoodtogo/deployment/docker-compose.prod.
 # Load environment from production env file
 EnvironmentFile=-/opt/toogoodtogo/deployment/.env.production
 
-# Start command
+# Start command (detached stack; relies on per-service restart policies)
 ExecStartPre=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} pull --quiet
-ExecStart=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} up --remove-orphans
-ExecStop=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} down
+ExecStart=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans
+ExecReload=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} up -d --remove-orphans
+ExecStop=/usr/bin/docker compose -f ${DOCKER_COMPOSE_FILE} down --timeout 30
 
-# Restart configuration
-Restart=always
-RestartSec=10
+# Restart on failure (handles rare compose command failures)
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 # Resource limits
 TimeoutStartSec=300
-TimeoutStopSec=60
+TimeoutStopSec=90
 
 # Logging
 StandardOutput=journal

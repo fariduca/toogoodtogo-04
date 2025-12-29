@@ -10,8 +10,7 @@
 #   2 - Target version not found
 #   3 - Backup restoration failed
 
-set -e
-set -o pipefail
+set -euo pipefail
 
 # =============================================================================
 # Configuration

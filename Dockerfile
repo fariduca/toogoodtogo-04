@@ -44,5 +44,8 @@ USER botuser
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
     CMD python -c "import sys; sys.exit(0)"
 
+# Run alembic migrations on startup
+CMD ["alembic", "upgrade", "head"]
+
 # Run bot
 CMD ["python", "-m", "src.bot.run"]

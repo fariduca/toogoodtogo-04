@@ -11,8 +11,7 @@
 #
 # This script is idempotent - safe to run multiple times
 
-set -e
-set -o pipefail
+set -euo pipefail
 
 # =============================================================================
 # Configuration
@@ -69,15 +68,11 @@ Usage: $SCRIPT_NAME [OPTIONS]
 Options:
     --help              Show this help message
     --non-interactive   Run without prompts (requires environment variables)
-    --skip-ssl          Skip SSL certificate provisioning
 
 Environment Variables (for non-interactive mode):
     TELEGRAM_BOT_TOKEN      Telegram bot API token (required)
-    TELEGRAM_WEBHOOK_URL    Telegram webhook URL (required)
     POSTGRES_PASSWORD       PostgreSQL password (required)
     SECRET_KEY              Application secret key (required)
-    DOMAIN                  Domain for SSL certificate (required for SSL)
-    SSL_EMAIL               Email for Let's Encrypt (required for SSL)
     STRIPE_API_KEY          Stripe API key (optional)
     GIT_REPO_URL            Git repository URL (default: current directory)
 
@@ -87,11 +82,8 @@ Examples:
 
     # Non-interactive setup
     export TELEGRAM_BOT_TOKEN="your-token"
-    export TELEGRAM_WEBHOOK_URL="https://your-domain.com/webhook"
     export POSTGRES_PASSWORD="secure-password"
     export SECRET_KEY="random-secret-key"
-    export DOMAIN="your-domain.com"
-    export SSL_EMAIL="admin@your-domain.com"
     sudo -E ./setup-droplet.sh --non-interactive
 
 EOF
@@ -176,17 +168,6 @@ install_docker() {
     log_info "Docker installed: $(docker --version)"
 }
 
-install_nginx_certbot() {
-    log_info "Installing nginx and certbot..."
-    
-    apt-get install -y -qq nginx certbot python3-certbot-nginx
-    
-    # Stop nginx for now (will configure later)
-    systemctl stop nginx || true
-    
-    log_info "nginx and certbot installed"
-}
-
 configure_firewall() {
     log_info "Configuring firewall (ufw)..."
     
@@ -200,12 +181,8 @@ configure_firewall() {
     ufw default deny incoming
     ufw default allow outgoing
     
-    # Allow SSH
+    # Allow SSH only (polling mode has no inbound HTTP/S)
     ufw allow OpenSSH
-    
-    # Allow HTTP and HTTPS
-    ufw allow 80/tcp
-    ufw allow 443/tcp
     
     # Enable firewall
     echo "y" | ufw enable
@@ -309,7 +286,6 @@ prompt_for_value() {
 
 create_env_file() {
     local non_interactive="$1"
-    local skip_ssl="$2"
     
     log_info "Configuring environment variables..."
     
@@ -317,7 +293,7 @@ create_env_file() {
     
     if [[ "$non_interactive" == "true" ]]; then
         # Validate required variables
-        local required_vars=("TELEGRAM_BOT_TOKEN" "TELEGRAM_WEBHOOK_URL" "POSTGRES_PASSWORD" "SECRET_KEY")
+        local required_vars=("TELEGRAM_BOT_TOKEN" "POSTGRES_PASSWORD" "SECRET_KEY")
         for var in "${required_vars[@]}"; do
             if [[ -z "${!var:-}" ]]; then
                 log_error "Required environment variable not set: $var"
@@ -327,7 +303,6 @@ create_env_file() {
     else
         # Interactive prompts
         TELEGRAM_BOT_TOKEN=$(prompt_for_value "TELEGRAM_BOT_TOKEN" "Enter Telegram Bot Token" true)
-        TELEGRAM_WEBHOOK_URL=$(prompt_for_value "TELEGRAM_WEBHOOK_URL" "Enter Telegram Webhook URL")
         POSTGRES_PASSWORD=$(prompt_for_value "POSTGRES_PASSWORD" "Enter PostgreSQL Password" true)
         SECRET_KEY=$(prompt_for_value "SECRET_KEY" "Enter Secret Key (or press enter to generate)" true)
         
@@ -337,8 +312,6 @@ create_env_file() {
             log_info "Generated secret key"
         fi
         
-        DOMAIN=$(prompt_for_value "DOMAIN" "Enter domain name for SSL")
-        SSL_EMAIL=$(prompt_for_value "SSL_EMAIL" "Enter email for Let's Encrypt")
         STRIPE_API_KEY=$(prompt_for_value "STRIPE_API_KEY" "Enter Stripe API Key (optional, press enter to skip)" true)
     fi
     
@@ -353,7 +326,6 @@ create_env_file() {
 
 # Telegram Configuration
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-TELEGRAM_WEBHOOK_URL=${TELEGRAM_WEBHOOK_URL}
 
 # Database Configuration
 POSTGRES_USER=${POSTGRES_USER}
@@ -382,9 +354,9 @@ DOCKER_COMPOSE_FILE=docker-compose.prod.yml
 HEALTH_CHECK_TIMEOUT=120
 APP_VERSION=latest
 
-# SSL
-DOMAIN=${DOMAIN:-}
-SSL_EMAIL=${SSL_EMAIL:-}
+# SSL (optional, webhook mode only)
+DOMAIN=
+SSL_EMAIL=
 EOF
 
     # Secure the file
@@ -396,59 +368,6 @@ EOF
 # =============================================================================
 # SSL Configuration
 # =============================================================================
-configure_ssl() {
-    local domain="${DOMAIN:-}"
-    local email="${SSL_EMAIL:-}"
-    
-    if [[ -z "$domain" ]]; then
-        log_warn "No domain specified, skipping SSL configuration"
-        return 0
-    fi
-    
-    log_info "Configuring SSL certificate for $domain..."
-    
-    # Create webroot directory for certbot challenge
-    mkdir -p /var/www/certbot
-    
-    # Update nginx config with actual domain
-    local nginx_conf="${DEPLOY_DIR}/deployment/nginx/nginx.conf"
-    if [[ -f "$nginx_conf" ]]; then
-        sed -i "s/YOUR_DOMAIN/$domain/g" "$nginx_conf"
-        log_info "Updated nginx configuration with domain: $domain"
-    fi
-    
-    # Copy SSL template to active config
-    local ssl_template="${DEPLOY_DIR}/deployment/nginx/ssl.conf.template"
-    local ssl_conf="/etc/nginx/ssl.conf"
-    if [[ -f "$ssl_template" ]]; then
-        cp "$ssl_template" "$ssl_conf"
-    fi
-    
-    # Start nginx temporarily for certbot challenge
-    systemctl start nginx || true
-    
-    # Obtain certificate
-    if [[ -n "$email" ]]; then
-        certbot certonly --nginx \
-            -d "$domain" \
-            --email "$email" \
-            --agree-tos \
-            --non-interactive \
-            --redirect || {
-            log_warn "SSL certificate provisioning failed - you can retry manually later"
-            return 0
-        }
-    else
-        log_warn "No email provided for Let's Encrypt, skipping SSL provisioning"
-        return 0
-    fi
-    
-    # Stop nginx (will be managed by Docker later)
-    systemctl stop nginx
-    
-    log_info "SSL certificate provisioned successfully"
-}
-
 # =============================================================================
 # Systemd Service Installation
 # =============================================================================
@@ -537,7 +456,6 @@ mark_setup_complete() {
 # =============================================================================
 main() {
     local non_interactive=false
-    local skip_ssl=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -547,10 +465,6 @@ main() {
                 ;;
             --non-interactive)
                 non_interactive=true
-                shift
-                ;;
-            --skip-ssl)
-                skip_ssl=true
                 shift
                 ;;
             *)
@@ -573,7 +487,6 @@ main() {
     # System setup
     update_system
     install_docker
-    install_nginx_certbot
     configure_firewall
     install_fail2ban
     
@@ -581,10 +494,6 @@ main() {
     create_env_file "$non_interactive" "$skip_ssl"
     
     # SSL configuration
-    if [[ "$skip_ssl" != "true" ]]; then
-        configure_ssl
-    fi
-    
     # Service configuration (placeholder)
     create_systemd_service
     

@@ -126,12 +126,15 @@ async def main() -> None:
 
     logger.info("Bot initialization complete, starting polling")
 
-    # Start health check HTTP server in background thread
+    loop = asyncio.get_running_loop()
+
+    # Start health check HTTP server in background thread (bind to localhost for polling mode)
     health_server = start_health_server(
-        host="0.0.0.0",
-        port=8000,
+        host=settings.health_host,
+        port=settings.health_port,
         db=db,
         redis_url=settings.redis_url,
+        loop=loop,
     )
     import threading
     health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
