@@ -42,6 +42,7 @@ class PostgresUserRepository(RepositoryBase[User]):
 
         self.session.add(db_user)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "user_created",
@@ -69,6 +70,7 @@ class PostgresUserRepository(RepositoryBase[User]):
         db_user.last_location_updated = entity.last_location_updated
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("user_updated", user_id=entity.id)
 
@@ -85,6 +87,7 @@ class PostgresUserRepository(RepositoryBase[User]):
 
         await self.session.delete(db_user)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("user_deleted", user_id=id)
 
@@ -127,6 +130,7 @@ class PostgresUserRepository(RepositoryBase[User]):
         db_user.last_location_updated = datetime.utcnow()
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("user_location_updated", user_id=user_id)
 

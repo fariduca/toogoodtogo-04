@@ -53,6 +53,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
 
         self.session.add(db_offer)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("offer_created", offer_id=str(db_offer.id), business_id=str(entity.business_id))
 
@@ -79,6 +80,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
         db_offer.state = entity.state
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("offer_updated", offer_id=str(entity.id))
 
@@ -95,6 +97,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
 
         await self.session.delete(db_offer)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("offer_deleted", offer_id=str(id))
 
@@ -138,6 +141,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
 
         db_offer.state = state
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("offer_state_updated", offer_id=str(id), state=state.value)
 
@@ -169,6 +173,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
             logger.info("offer_sold_out", offer_id=str(id))
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "quantity_decremented",
@@ -197,6 +202,7 @@ class PostgresOfferRepository(RepositoryBase[Offer]):
                 logger.info("offer_reactivated_from_sold_out", offer_id=str(id))
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "quantity_incremented",

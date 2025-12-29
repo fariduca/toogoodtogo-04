@@ -74,12 +74,20 @@ async def main() -> None:
     db = Database(settings)
     await db.connect()
 
-    async with db.session() as session:
-        # Initialize repositories
-        user_repo = PostgresUserRepository(session)
-        business_repo = PostgresBusinessRepository(session)
-        offer_repo = PostgresOfferRepository(session)
-        reservation_repo = PostgresReservationRepository(session)
+    # Create a persistent session for the bot lifetime
+    # Note: We need a long-lived session for repository operations
+    session_factory = db._session_factory
+    if session_factory is None:
+        raise RuntimeError("Database not connected properly")
+    
+    # Create a session that will be used for all repository operations
+    session = session_factory()
+    
+    # Initialize repositories with the persistent session
+    user_repo = PostgresUserRepository(session)
+    business_repo = PostgresBusinessRepository(session)
+    offer_repo = PostgresOfferRepository(session)
+    reservation_repo = PostgresReservationRepository(session)
 
     # Initialize Redis-backed services
     redis_locks = RedisLockHelper(settings.redis_url, ttl_seconds=settings.redis_lock_ttl_seconds)
@@ -161,6 +169,8 @@ async def main() -> None:
         await scheduler.stop()
         scheduler_task.cancel()
         await rate_limiter.disconnect()
+        # Close the persistent session before disconnecting the database
+        await session.close()
         await db.disconnect()
         await application.updater.stop()
         await application.stop()
