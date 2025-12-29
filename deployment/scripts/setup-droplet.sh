@@ -456,6 +456,7 @@ mark_setup_complete() {
 # =============================================================================
 main() {
     local non_interactive=false
+    local skip_ssl=false
     
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -465,6 +466,10 @@ main() {
                 ;;
             --non-interactive)
                 non_interactive=true
+                shift
+                ;;
+            --skip-ssl)
+                skip_ssl=true
                 shift
                 ;;
             *)
