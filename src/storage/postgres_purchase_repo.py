@@ -56,6 +56,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
 
         self.session.add(db_purchase)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "purchase_created",
@@ -91,6 +92,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
             db_purchase.payment_session_id = entity.payment_session_id
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("purchase_updated", purchase_id=str(entity.id))
 
@@ -107,6 +109,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
 
         await self.session.delete(db_purchase)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("purchase_deleted", purchase_id=str(id))
 
@@ -135,6 +138,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
 
         db_purchase.status = status
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("purchase_status_updated", purchase_id=str(id), status=status.value)
 
@@ -152,6 +156,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
         db_purchase.status = PurchaseStatus.CONFIRMED
         db_purchase.payment_session_id = payment_reference
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "purchase_confirmed",
@@ -186,6 +191,7 @@ class PostgresPurchaseRepository(RepositoryBase[Purchase]):
             )
             self.session.add(db_customer)
             await self.session.flush()
+            await self.session.commit()
             logger.info("customer_created", telegram_id=telegram_id)
 
     def _to_domain_model(self, db_purchase: PurchaseTable) -> Purchase:

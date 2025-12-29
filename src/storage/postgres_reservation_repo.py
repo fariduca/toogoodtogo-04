@@ -53,6 +53,7 @@ class PostgresReservationRepository(RepositoryBase[Reservation]):
 
         self.session.add(db_reservation)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "reservation_created",
@@ -80,6 +81,7 @@ class PostgresReservationRepository(RepositoryBase[Reservation]):
         db_reservation.cancelled_at = entity.cancelled_at
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("reservation_updated", reservation_id=str(entity.id))
 
@@ -96,6 +98,7 @@ class PostgresReservationRepository(RepositoryBase[Reservation]):
 
         await self.session.delete(db_reservation)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("reservation_deleted", reservation_id=str(id))
 
@@ -173,6 +176,7 @@ class PostgresReservationRepository(RepositoryBase[Reservation]):
         db_reservation.cancelled_at = datetime.utcnow()
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "reservation_cancelled",

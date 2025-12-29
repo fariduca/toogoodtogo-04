@@ -50,6 +50,7 @@ class PostgresBusinessRepository(RepositoryBase[Business]):
 
         self.session.add(db_business)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info(
             "business_created",
@@ -84,6 +85,7 @@ class PostgresBusinessRepository(RepositoryBase[Business]):
         db_business.verified_by = entity.verified_by
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("business_updated", business_id=str(entity.id))
 
@@ -100,6 +102,7 @@ class PostgresBusinessRepository(RepositoryBase[Business]):
 
         await self.session.delete(db_business)
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("business_deleted", business_id=str(id))
 
@@ -145,6 +148,7 @@ class PostgresBusinessRepository(RepositoryBase[Business]):
         db_business.verified_by = approved_by
 
         await self.session.flush()
+        await self.session.commit()
 
         logger.info("business_approved", business_id=str(id), approved_by=approved_by)
 
