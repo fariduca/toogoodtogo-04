@@ -299,6 +299,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
     # Class-level references to resources (set during server startup)
     db = None
     redis_url: str | None = None
+    loop: asyncio.AbstractEventLoop | None = None
 
     def log_message(self, format: str, *args: Any) -> None:
         """Override to use structured logging."""
@@ -312,40 +313,56 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'{"error": "Not Found"}')
             return
 
-        # Run async health check in new event loop
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        async def run_check() -> HealthCheckResult:
+            session = None
+            try:
+                if self.db is not None:
+                    async with self.db.session() as session:
+                        return await perform_health_check(session, self.redis_url)
+                return await perform_health_check(None, self.redis_url)
+            except Exception as e:
+                logger.error("health_check_error", error=str(e))
+                return HealthCheckResult(
+                    status="unhealthy",
+                    version=APP_VERSION,
+                    uptime_seconds=int(time.time() - _start_time),
+                    timestamp=datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    errors=[f"Health check failed: {str(e)}"],
+                )
 
-            async def run_check() -> HealthCheckResult:
-                session = None
-                try:
-                    if self.db is not None:
-                        async with self.db.session() as session:
-                            return await perform_health_check(session, self.redis_url)
-                    return await perform_health_check(None, self.redis_url)
-                except Exception as e:
-                    logger.error("health_check_error", error=str(e))
-                    return HealthCheckResult(
-                        status="unhealthy",
-                        version=APP_VERSION,
-                        uptime_seconds=int(time.time() - _start_time),
-                        timestamp=datetime.now(timezone.utc)
-                        .isoformat()
-                        .replace("+00:00", "Z"),
-                        errors=[f"Health check failed: {str(e)}"],
-                    )
-
-            result = loop.run_until_complete(run_check())
-            loop.close()
-        except Exception as e:
+        loop = self.loop
+        if loop is None or loop.is_closed():
+            logger.error(
+                "health_check_error",
+                error="Event loop unavailable for health check",
+            )
             result = HealthCheckResult(
                 status="unhealthy",
                 version=APP_VERSION,
                 uptime_seconds=int(time.time() - _start_time),
-                timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                errors=[f"Health check error: {str(e)}"],
+                timestamp=datetime.now(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z"),
+                errors=["Health check loop unavailable"],
             )
+        else:
+            future = asyncio.run_coroutine_threadsafe(run_check(), loop)
+            try:
+                result = future.result(timeout=10)
+            except Exception as e:
+                future.cancel()
+                logger.error("health_check_error", error=str(e))
+                result = HealthCheckResult(
+                    status="unhealthy",
+                    version=APP_VERSION,
+                    uptime_seconds=int(time.time() - _start_time),
+                    timestamp=datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    errors=[f"Health check error: {str(e)}"],
+                )
 
         # Send response
         import json
@@ -361,10 +378,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 
 def start_health_server(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8000,
     db: Any = None,
     redis_url: str | None = None,
+    loop: asyncio.AbstractEventLoop | None = None,
 ) -> HTTPServer:
     """Start HTTP server for health check endpoint.
 
@@ -373,12 +391,14 @@ def start_health_server(
         port: Port to listen on
         db: Database instance for health checks
         redis_url: Redis URL for health checks
+        loop: Event loop used to execute async health checks
 
     Returns:
         Running HTTPServer instance
     """
     HealthCheckHandler.db = db
     HealthCheckHandler.redis_url = redis_url
+    HealthCheckHandler.loop = loop or asyncio.get_event_loop()
 
     server = HTTPServer((host, port), HealthCheckHandler)
     logger.info("health_server_started", host=host, port=port)

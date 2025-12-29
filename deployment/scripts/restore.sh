@@ -10,8 +10,7 @@
 #   2 - Backup file not found or corrupted
 #   3 - Database connection failed
 
-set -e
-set -o pipefail
+set -euo pipefail
 
 # =============================================================================
 # Configuration

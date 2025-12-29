@@ -10,8 +10,7 @@
 #   2 - Backup failed
 #   3 - Migration failed
 
-set -e
-set -o pipefail
+set -euo pipefail
 
 # =============================================================================
 # Configuration
@@ -24,6 +23,8 @@ readonly LOG_FILE="${LOG_DIR}/deployment.log"
 readonly DOCKER_COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-docker-compose.prod.yml}"
 readonly HEALTH_CHECK_TIMEOUT="${HEALTH_CHECK_TIMEOUT:-120}"
 readonly DEPLOYMENT_LOCK_FILE="/tmp/toogoodtogo-deploy.lock"
+readonly DRAIN_WAIT="${DRAIN_WAIT:-5}"
+readonly STOP_TIMEOUT="${STOP_TIMEOUT:-30}"
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -33,8 +34,10 @@ readonly NC='\033[0m'
 
 # Track deployment state for rollback
 PREVIOUS_VERSION=""
+PREVIOUS_IMAGE=""
 BACKUP_FILE=""
 DEPLOYMENT_STARTED=false
+ROLLBACK_ATTEMPTED=false
 
 # =============================================================================
 # Logging Functions
@@ -112,24 +115,50 @@ cleanup() {
 }
 
 rollback() {
-    if [[ -n "$PREVIOUS_VERSION" ]]; then
-        log_info "Rolling back to $PREVIOUS_VERSION"
-        
-        cd "${DEPLOY_DIR}/deployment"
-        
-        # Restore previous version
-        if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
-            log_info "Restoring database from backup"
-            "${SCRIPT_DIR}/restore.sh" "$BACKUP_FILE" || log_warn "Database restore failed"
-        fi
-        
-        # Restart with previous image
-        docker compose -f "$DOCKER_COMPOSE_FILE" up -d --pull never || true
-        
-        log_info "Rollback complete"
-    else
-        log_warn "No previous version available for rollback"
+    if [[ "$ROLLBACK_ATTEMPTED" == "true" ]]; then
+        log_warn "Rollback already attempted, skipping"
+        return 1
     fi
+    ROLLBACK_ATTEMPTED=true
+
+    if [[ -z "$PREVIOUS_VERSION" || "$PREVIOUS_VERSION" == "none" ]]; then
+        log_warn "No previous version available for rollback"
+        return 1
+    fi
+
+    log_info "Rolling back to $PREVIOUS_VERSION"
+
+    cd "${DEPLOY_DIR}/deployment"
+
+    # Restore database from backup if we have one
+    if [[ -n "$BACKUP_FILE" ]] && [[ -f "$BACKUP_FILE" ]]; then
+        log_info "Restoring database from backup: $BACKUP_FILE"
+        "${SCRIPT_DIR}/restore.sh" "$BACKUP_FILE" || log_warn "Database restore failed"
+    fi
+
+    # Restore to previous version
+    if [[ -n "$PREVIOUS_IMAGE" ]]; then
+        log_info "Restoring previous image: $PREVIOUS_IMAGE"
+        export APP_VERSION="$PREVIOUS_VERSION"
+        docker compose -f "$DOCKER_COMPOSE_FILE" up -d --no-build || true
+    else
+        docker compose -f "$DOCKER_COMPOSE_FILE" up -d --pull never || true
+    fi
+
+    # Verify rollback succeeded
+    sleep 10
+    if [[ -x "${SCRIPT_DIR}/health-check.sh" ]]; then
+        if "${SCRIPT_DIR}/health-check.sh" --wait 60 &>/dev/null; then
+            log_info "Rollback successful"
+            return 0
+        else
+            log_error "Rollback health check failed"
+            return 1
+        fi
+    fi
+
+    log_info "Rollback complete (unverified)"
+    return 0
 }
 
 trap cleanup EXIT
@@ -173,11 +202,16 @@ get_current_version() {
     
     if docker compose -f "$DOCKER_COMPOSE_FILE" ps -q bot &>/dev/null; then
         PREVIOUS_VERSION=$(docker compose -f "$DOCKER_COMPOSE_FILE" exec -T bot printenv APP_VERSION 2>/dev/null || echo "unknown")
+        PREVIOUS_IMAGE=$(docker compose -f "$DOCKER_COMPOSE_FILE" images bot --format "{{.Repository}}:{{.Tag}}" 2>/dev/null || echo "")
     else
         PREVIOUS_VERSION="none"
+        PREVIOUS_IMAGE=""
     fi
     
     log_info "Current version: $PREVIOUS_VERSION"
+    if [[ -n "$PREVIOUS_IMAGE" ]]; then
+        log_info "Current image: $PREVIOUS_IMAGE"
+    fi
 }
 
 # =============================================================================
@@ -204,6 +238,31 @@ create_backup() {
     else
         log_warn "Backup script not available, skipping backup"
     fi
+}
+
+pre_deploy_health_check() {
+    log_info "Running pre-deployment health check"
+
+    if [[ -x "${SCRIPT_DIR}/health-check.sh" ]]; then
+        if ! "${SCRIPT_DIR}/health-check.sh" --quiet; then
+            log_warn "Pre-deployment health check failed - services may already be unhealthy"
+            return 1
+        fi
+        log_info "Pre-deployment health check passed"
+    else
+        log_warn "Health check script not available"
+    fi
+    return 0
+}
+
+drain_services() {
+    log_info "Draining services (waiting ${DRAIN_WAIT}s for in-flight requests)"
+
+    # For polling bot there is no external ingress to drain,
+    # but we give time for any pending update processing
+    sleep "$DRAIN_WAIT"
+
+    log_info "Drain complete"
 }
 
 fetch_and_checkout() {
@@ -274,15 +333,20 @@ run_migrations() {
     log_info "Migrations applied successfully"
 }
 
-start_services() {
-    log_info "Starting services"
-    
+deploy_services() {
+    log_info "Deploying services with controlled recreate"
+
     cd "${DEPLOY_DIR}/deployment"
-    
-    # Start all services
-    docker compose -f "$DOCKER_COMPOSE_FILE" up -d
-    
-    log_info "Services started"
+
+    # Stop bot gracefully with timeout
+    log_info "Stopping bot container (timeout: ${STOP_TIMEOUT}s)"
+    docker compose -f "$DOCKER_COMPOSE_FILE" stop --timeout "$STOP_TIMEOUT" bot || true
+
+    # Recreate with new image
+    log_info "Starting services with new version"
+    docker compose -f "$DOCKER_COMPOSE_FILE" up -d --remove-orphans
+
+    log_info "Services deployed"
 }
 
 wait_for_health() {
@@ -383,18 +447,22 @@ main() {
     create_backup "$skip_backup"
     
     DEPLOYMENT_STARTED=true
+
+    # Pre-deploy health check and drain
+    pre_deploy_health_check || true
+    drain_services
     
     # Deployment steps
     fetch_and_checkout "$git_tag"
     pull_docker_images "$git_tag"
     run_migrations "$skip_migration"
-    start_services
+    deploy_services
     
-    # Validation
+    # Validation with health gate
     if wait_for_health; then
         log_info "Deployment successful: $git_tag"
     else
-        log_error "Deployment validation failed"
+        log_error "Deployment validation failed - triggering rollback"
         exit 1
     fi
 }

@@ -10,8 +10,7 @@
 #   2 - Verification failed
 #   3 - Disk space insufficient
 
-set -e
-set -o pipefail
+set -euo pipefail
 
 # =============================================================================
 # Configuration

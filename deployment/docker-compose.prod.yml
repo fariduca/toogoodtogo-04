@@ -4,7 +4,7 @@
 # Prerequisites:
 #   1. Copy .env.production.template to .env.production
 #   2. Fill in all required values
-#   3. SSL certificates configured via nginx/ssl/
+#   3. SSL certificates only needed when enabling the webhook/nginx profile
 
 services:
   # =============================================================================
@@ -29,6 +29,8 @@ services:
       retries: 5
       start_period: 30s
     deploy:
+      restart_policy:
+        condition: any
       resources:
         limits:
           cpus: '0.5'
@@ -62,6 +64,8 @@ services:
       retries: 5
       start_period: 10s
     deploy:
+      restart_policy:
+        condition: any
       resources:
         limits:
           cpus: '0.25'
@@ -105,8 +109,6 @@ services:
         condition: service_healthy
     networks:
       - toogoodtogo_network
-    ports:
-      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
       interval: 30s
@@ -114,6 +116,8 @@ services:
       retries: 3
       start_period: 60s
     deploy:
+      restart_policy:
+        condition: any
       resources:
         limits:
           cpus: '0.75'
@@ -134,6 +138,7 @@ services:
     image: nginx:1.25-alpine
     container_name: toogoodtogo_nginx
     restart: unless-stopped
+    profiles: ["webhook"]
     ports:
       - "80:80"
       - "443:443"
@@ -152,6 +157,8 @@ services:
       timeout: 10s
       retries: 3
     deploy:
+      restart_policy:
+        condition: any
       resources:
         limits:
           cpus: '0.25'

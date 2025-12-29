@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     app_name: str = "telegram-marketplace"
     environment: str = "development"
 
+    # Health server
+    health_host: str = "127.0.0.1"
+    health_port: int = 8000
+
     @property
     def admin_user_ids(self) -> list[int]:
         """Parse admin user IDs from comma-separated string."""

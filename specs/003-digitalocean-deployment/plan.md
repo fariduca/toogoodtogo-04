@@ -7,17 +7,17 @@
 
 ## Summary
 
-Deploy the Telegram marketplace backend application (Python 3.12+ with python-telegram-bot) to a DigitalOcean droplet along with PostgreSQL and Redis. The deployment will use Docker Compose for service orchestration, implement automatic service restarts, configure SSL/TLS for webhook endpoints, and establish monitoring and backup strategies. The deployment approach prioritizes reliability and operational simplicity for initial production use.
+Deploy the Telegram marketplace backend application (Python 3.12+ with python-telegram-bot) to a DigitalOcean droplet along with PostgreSQL and Redis. The deployment will use Docker Compose for service orchestration, implement automatic service restarts, and keep the footprint minimal for long-polling mode (no public ingress, no TLS/webhook). Optional monitoring and backup scripts remain available without requiring nginx or certbot in the baseline setup.
 
 ## Technical Context
 
 **Language/Version**: Python 3.12+ (existing application runtime)  
-**Primary Dependencies**: Docker Engine 24+, Docker Compose v2, nginx (reverse proxy), certbot (SSL/TLS)  
+**Primary Dependencies**: Docker Engine 24+, Docker Compose v2  
 **Storage**: PostgreSQL 16 (persistent data), Redis 7 with RDB snapshots (cache + rate limiting)  
 **Testing**: pytest (application tests), docker-compose health checks, deployment validation scripts  
 **Target Platform**: DigitalOcean Droplet - Ubuntu 22.04 LTS (4GB RAM, 2 vCPUs, 80GB SSD minimum)  
-**Project Type**: Infrastructure/DevOps - single droplet deployment with containerized services  
-**Performance Goals**: Bot response <2s under normal load, DB queries <500ms for 95% requests, health checks <100ms  
+**Project Type**: Infrastructure/DevOps - single droplet deployment with containerized services (long polling, outbound-only traffic)  
+**Performance Goals**: Bot response <2s under normal load, DB queries <500ms for 95% requests, health checks <100ms (internal-only)  
 **Constraints**: 99.5% uptime target, service restart <5 min after reboot, deployment time <15 min, zero data loss during planned maintenance  
 **Scale/Scope**: Initial production deployment supporting <100 concurrent users, single-region deployment
 
@@ -33,13 +33,12 @@ Deploy the Telegram marketplace backend application (Python 3.12+ with python-te
 
 ### Principle III: Secure & Privacy-Conscious Interaction
 ⚠️ **ATTENTION REQUIRED** - Deployment must implement:
-- SSL/TLS for webhook endpoints (FR-015)
 - Environment variable management for secrets (FR-011, no secrets in code/Git)
-- Firewall configuration to restrict access (FR-016)
+- Firewall configuration to restrict access (FR-016) — inbound closed for polling; allow only egress to Telegram + DB/Redis private network
 - Structured logging with PII scrubbing (FR-010)
 - Token rotation mechanism (mentioned in constitution)
 
-**Gate Decision**: PASS with requirements - security constraints from constitution are explicitly addressed in functional requirements.
+**Gate Decision**: PASS with requirements - TLS/certbot not required for long-polling baseline; webhook/TLS to be added only if/when webhook mode is enabled.
 
 ### Technical & Security Constraints
 ✅ **PASS** - Deployment maintains existing constraints:
@@ -55,7 +54,7 @@ Deploy the Telegram marketplace backend application (Python 3.12+ with python-te
 - Semantic versioning preserved
 - Health endpoint `/health` returns version, uptime, dependency status (already required by constitution)
 
-**Overall Gate Status**: ✅ **PASS** - All constitutional requirements satisfied. Security requirements explicitly captured in functional requirements.
+**Overall Gate Status**: ✅ **PASS** - All constitutional requirements satisfied for polling baseline; webhook/TLS remains an opt-in extension.
 
 ## Project Structure
 
@@ -76,10 +75,7 @@ specs/003-digitalocean-deployment/
 ```text
 # Deployment Infrastructure (new for this feature)
 deployment/
-├── docker-compose.prod.yml      # Production Docker Compose configuration
-├── nginx/
-│   ├── nginx.conf               # Reverse proxy configuration
-│   └── ssl/                     # SSL certificate storage (gitignored)
+├── docker-compose.prod.yml      # Production Docker Compose configuration (polling, no public ingress)
 ├── scripts/
 │   ├── deploy.sh                # Main deployment script
 │   ├── backup.sh                # Database backup script
@@ -88,8 +84,11 @@ deployment/
 │   └── rollback.sh              # Rollback to previous version
 ├── systemd/
 │   └── toogoodtogo.service      # Systemd service for auto-restart
-├── monitoring/
-│   ├── docker-compose.monitoring.yml  # Optional: Prometheus/Grafana setup
+├── nginx/                       # Optional: only needed for webhook/TLS
+│   ├── nginx.conf
+│   └── ssl/                     # SSL certificate storage (gitignored)
+├── monitoring/                  # Optional: Prometheus/Grafana setup
+│   ├── docker-compose.monitoring.yml
 │   └── prometheus.yml           # Metrics configuration
 └── .env.production.template     # Template for production environment variables
 

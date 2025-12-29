@@ -6,7 +6,7 @@
 
 ## Overview
 
-This guide walks you through deploying the TooGoodToGo Telegram marketplace bot to a DigitalOcean droplet for the first time. Follow these steps to go from a fresh droplet to a production-ready deployment.
+This guide walks you through deploying the TooGoodToGo Telegram marketplace bot to a DigitalOcean droplet for the first time **using long polling**. No public HTTP/S ingress or TLS is required for this baseline; all traffic is outbound to Telegram plus private DB/Redis networking.
 
 **Time Required**: ~45 minutes  
 **Skill Level**: Intermediate (familiarity with Linux, Docker, and command line required)
@@ -24,14 +24,9 @@ This guide walks you through deploying the TooGoodToGo Telegram marketplace bot 
   - **Region**: Choose based on user location
   - **SSH Key**: Added to droplet during creation
 
-### 2. Domain Name (for SSL/webhook)
+### 2. Domain Name (optional, webhook-only)
 
-- [ ] Domain name registered (e.g., `yourdomain.com`)
-- [ ] DNS A record pointing to droplet IP:
-  ```
-  bot.yourdomain.com → <droplet-ip-address>
-  ```
-- [ ] DNS propagated (check with `dig bot.yourdomain.com`)
+- Only needed if you later switch to webhook + HTTPS. For polling you can skip this entirely.
 
 ### 3. Telegram Bot Created
 
@@ -88,7 +83,7 @@ git clone https://github.com/yourusername/toogoodtogo.git /opt/toogoodtogo
 cd /opt/toogoodtogo/deployment/scripts
 ```
 
-### 2.2 Run Setup Script
+### 2.2 Run Setup Script (polling baseline)
 
 ```bash
 chmod +x setup-droplet.sh
@@ -97,20 +92,17 @@ chmod +x setup-droplet.sh
 
 **What this does**:
 - Installs Docker and Docker Compose
-- Installs nginx and certbot (for SSL)
-- Configures firewall (ufw)
+- Configures firewall (ufw) to allow only SSH inbound (no HTTP/S needed for polling)
 - Creates directory structure
-- Sets up environment configuration
+- Sets up environment configuration for long polling (no TLS/webhook)
 
 **Interactive Prompts** (have these ready):
 
 ```
 Enter Telegram Bot Token: <paste-your-token>
-Enter Telegram Webhook URL: https://bot.yourdomain.com/webhook
 Enter PostgreSQL Password: <create-strong-password>
-Enter Stripe API Key: <paste-your-stripe-key>
-Enter domain name for SSL: bot.yourdomain.com
-Enter email for SSL certificate: your-email@example.com
+Enter Secret Key (optional auto-generate): <leave blank to auto-generate>
+Enter Stripe API Key (optional): <press enter to skip if not used>
 ```
 
 **Expected Output**:
@@ -150,8 +142,6 @@ Status: active
 To                         Action      From
 --                         ------      ----
 22/tcp                     ALLOW       Anywhere
-80/tcp                     ALLOW       Anywhere
-443/tcp                    ALLOW       Anywhere
 ```
 
 ### 3.3 Check SSL Certificate
@@ -189,25 +179,24 @@ git checkout v1.0.0
 
 ```bash
 # Check environment file
-cat /opt/toogoodtogo/.env.production
+cat /opt/toogoodtogo/deployment/.env.production
 
 # Verify all required variables are set
 ```
 
-**Required Variables**:
+**Required Variables (polling)**:
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_WEBHOOK_URL`
-- `DATABASE_URL`
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` (DATABASE_URL derived)
 - `REDIS_URL`
-- `STRIPE_API_KEY`
+- `SECRET_KEY`
 - `ENVIRONMENT=production`
 
-### 4.3 Start Services
+### 4.3 Start Services (no ingress)
 
 ```bash
-cd /opt/toogoodtogo
+cd /opt/toogoodtogo/deployment
 
-# Start all services
+# Start core services (bot, postgres, redis). Nginx profile is disabled by default.
 docker compose -f docker-compose.prod.yml up -d
 
 # View logs
@@ -268,18 +257,12 @@ docker ps
 3. Send `/start` command
 4. **Expected**: Bot responds with welcome message
 
-### 5.4 Verify Webhook Configuration
+### 5.4 Verify Bot Interaction (polling)
 
-```bash
-# Check nginx is proxying correctly
-curl -I https://bot.yourdomain.com/webhook
-```
-
-**Expected**:
-```
-HTTP/2 200
-server: nginx
-```
+1. Open Telegram
+2. Search for your bot (`@YourMarketplaceBot`)
+3. Send `/start` command
+4. **Expected**: Bot responds with welcome message
 
 ---
 
@@ -412,9 +395,10 @@ docker inspect --format='{{.LogPath}}' toogoodtogo_postgres
 ```
 
 **Log Retention Configuration** (in docker-compose.prod.yml):
-- Bot: 50MB max size, 10 files (500MB total)
-- PostgreSQL: 10MB max size, 5 files (50MB total)
-- Redis: 10MB max size, 3 files (30MB total)
+- Bot: 20MB max size, 5 files (100MB total)
+- PostgreSQL: 5MB max size, 3 files (15MB total)
+- Redis: 5MB max size, 2 files (10MB total)
+- nginx: 10MB max size, 3 files (30MB total) - webhook profile only
 - nginx: 20MB max size, 5 files (100MB total)
 
 ### 8.2 View Deployment Logs
