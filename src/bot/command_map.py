@@ -24,9 +24,6 @@ from src.handlers.offer_posting.business_registration_handler import (
 from src.handlers.offer_posting.business_verify_handler import (
     get_verification_handlers,
 )
-# TODO: Migrate offer_draft_handler to new quantity-based offer system (no Item model)
-# from src.handlers.offer_posting.offer_draft_handler import get_offer_draft_handler
-from src.handlers.offer_posting.offer_publish_handler import get_publish_handler
 # TODO: Migrate purchase_cancel_handler to use reservation system
 # from src.handlers.purchasing.purchase_cancel_handler import get_cancellation_handler
 from src.handlers.purchasing.reserve_handler import get_reservation_handlers
@@ -60,6 +57,11 @@ def register_handlers(app: Application) -> None:
     app.add_handler(get_settings_handler())
     logger.info("handler_registered", handler="settings")
     
+    # New deal creation (Phase 3) - must be before registration handler
+    # since registration uses a broad TEXT filter for role selection
+    app.add_handler(get_newdeal_handler())
+    logger.info("handler_registered", handler="newdeal_conversation")
+    
     # Registration conversation flow (Phase 2)
     app.add_handler(get_registration_conversation_handler())
     logger.info("handler_registered", handler="registration_conversation")
@@ -68,10 +70,6 @@ def register_handlers(app: Application) -> None:
     for handler in get_approval_handlers():
         app.add_handler(handler)
     logger.info("handler_registered", handler="business_approval")
-    
-    # New deal creation (Phase 3)
-    app.add_handler(get_newdeal_handler())
-    logger.info("handler_registered", handler="newdeal_conversation")
 
     # Old business registration flow (to be deprecated)
     app.add_handler(get_registration_handler())
@@ -81,15 +79,6 @@ def register_handlers(app: Application) -> None:
     for handler in get_verification_handlers():
         app.add_handler(handler)
     logger.info("handler_registered", handler="business_verification")
-
-    # TODO: Re-implement offer draft handler for new quantity-based system
-    # Offer creation flow (conversation) - DEPRECATED
-    # app.add_handler(get_offer_draft_handler())
-    # logger.info("handler_registered", handler="offer_draft_conversation")
-
-    # Offer publish command
-    app.add_handler(get_publish_handler())
-    logger.info("handler_registered", handler="offer_publish")
 
     # Discovery & Browse handlers (Phase 4)
     for handler in get_browse_handlers():
