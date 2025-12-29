@@ -102,6 +102,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=production
       - APP_VERSION=${APP_VERSION:-latest}
+      - ADMIN_TELEGRAM_IDS=${ADMIN_TELEGRAM_IDS:-}
     depends_on:
       postgres:
         condition: service_healthy
