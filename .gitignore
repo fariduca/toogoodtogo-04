@@ -177,3 +177,8 @@ uploads/
 images/
 logs/
 *.log
+
+# Other
+.github/
+.specify/
+.vscode/
