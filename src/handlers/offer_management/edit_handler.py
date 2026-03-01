@@ -13,9 +13,11 @@ from telegram.ext import (
 )
 from uuid import UUID
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.storage.postgres_offer_repo import PostgresOfferRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -29,6 +31,12 @@ async def handle_edit_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract offer_id from callback_data (format: "edit_offer:uuid")
     offer_id_str = query.data.split(":")[1]
@@ -38,13 +46,13 @@ async def handle_edit_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Offer not found.")
+        await query.edit_message_text(t("err_offer_not_found", lang))
         return ConversationHandler.END
     
     # Validate state
     if offer.state not in [OfferStatus.ACTIVE, OfferStatus.PAUSED]:
         await query.edit_message_text(
-            f"❌ Cannot edit offer in {offer.state.value} state."
+            t("offer_edit_cannot", lang, state=offer.state.value)
         )
         return ConversationHandler.END
     
@@ -54,22 +62,22 @@ async def handle_edit_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     # Show edit options
     keyboard = [
-        [InlineKeyboardButton("💰 Edit Price", callback_data="edit_field:price")],
-        [InlineKeyboardButton("📦 Edit Quantity", callback_data="edit_field:quantity")],
-        [InlineKeyboardButton("📝 Edit Description", callback_data="edit_field:description")],
-        [InlineKeyboardButton("⏰ Edit Pickup Time", callback_data="edit_field:pickup_end")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="edit_cancel")],
+        [InlineKeyboardButton(t("btn_edit_price", lang), callback_data="edit_field:price")],
+        [InlineKeyboardButton(t("btn_edit_quantity", lang), callback_data="edit_field:quantity")],
+        [InlineKeyboardButton(t("btn_edit_description", lang), callback_data="edit_field:description")],
+        [InlineKeyboardButton(t("btn_edit_pickup", lang), callback_data="edit_field:pickup_end")],
+        [InlineKeyboardButton(t("btn_cancel", lang), callback_data="edit_cancel")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"✏️ **Edit {offer.title}**\n\n"
-        f"Current settings:\n"
-        f"• Price: €{offer.price_per_unit}\n"
-        f"• Quantity: {offer.quantity_remaining}/{offer.quantity_total}\n"
-        f"• Description: {offer.description[:50]}...\n"
-        f"• Pickup ends: {offer.pickup_end_time.strftime('%H:%M')}\n\n"
-        "What would you like to edit?",
+        t("offer_edit_header", lang,
+          title=offer.title,
+          price=offer.price_per_unit,
+          remaining=offer.quantity_remaining,
+          total=offer.quantity_total,
+          description=offer.description[:50],
+          pickup_end=offer.pickup_end_time.strftime('%H:%M')),
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -82,46 +90,39 @@ async def handle_edit_field_selection(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
     
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     field = query.data.split(":")[1]
     offer = context.user_data.get("edit_offer")
     
     if not offer:
-        await query.edit_message_text("❌ Session expired. Use /myoffers to try again.")
+        await query.edit_message_text(t("offer_edit_session_expired", lang))
         return ConversationHandler.END
     
     if field == "price":
         await query.edit_message_text(
-            f"💰 **Edit Price**\n\n"
-            f"Current price: €{offer.price_per_unit}\n\n"
-            f"Enter new price (e.g., 5.50):\n"
-            f"Type /cancel to abort."
+            t("offer_edit_price_prompt", lang, price=offer.price_per_unit)
         )
         return EDIT_PRICE
     
     elif field == "quantity":
         await query.edit_message_text(
-            f"📦 **Edit Quantity**\n\n"
-            f"Current remaining: {offer.quantity_remaining}\n\n"
-            f"Enter new quantity available:\n"
-            f"Type /cancel to abort."
+            t("offer_edit_quantity_prompt", lang, remaining=offer.quantity_remaining)
         )
         return EDIT_QUANTITY
     
     elif field == "description":
         await query.edit_message_text(
-            f"📝 **Edit Description**\n\n"
-            f"Current: {offer.description}\n\n"
-            f"Enter new description (10-200 characters):\n"
-            f"Type /cancel to abort."
+            t("offer_edit_desc_prompt", lang, description=offer.description)
         )
         return EDIT_DESCRIPTION
     
     elif field == "pickup_end":
         await query.edit_message_text(
-            f"⏰ **Edit Pickup End Time**\n\n"
-            f"Current: {offer.pickup_end_time.strftime('%H:%M')}\n\n"
-            f"Enter new end time (format: HH:MM, e.g., 18:30):\n"
-            f"Type /cancel to abort."
+            t("offer_edit_pickup_prompt", lang, pickup_end=offer.pickup_end_time.strftime('%H:%M'))
         )
         return EDIT_PICKUP_END
     
@@ -130,11 +131,16 @@ async def handle_edit_field_selection(update: Update, context: ContextTypes.DEFA
 
 async def handle_edit_price_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle price edit input."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     try:
         new_price = Decimal(update.message.text.strip())
         
         if new_price <= 0:
-            await update.message.reply_text("❌ Price must be greater than 0. Try again:")
+            await update.message.reply_text(t("offer_edit_price_invalid", lang))
             return EDIT_PRICE
         
         # Update offer
@@ -146,8 +152,7 @@ async def handle_edit_price_input(update: Update, context: ContextTypes.DEFAULT_
         updated = await offer_repo.update(offer)
         
         await update.message.reply_text(
-            f"✅ Price updated to €{new_price}\n\n"
-            "Use /myoffers to see your offers."
+            t("offer_edit_price_updated", lang, price=new_price)
         )
         
         logger.info(
@@ -160,18 +165,23 @@ async def handle_edit_price_input(update: Update, context: ContextTypes.DEFAULT_
     
     except (ValueError, decimal.InvalidOperation):
         await update.message.reply_text(
-            "❌ Invalid price format. Enter a number (e.g., 5.50):"
+            t("offer_edit_price_format", lang)
         )
         return EDIT_PRICE
 
 
 async def handle_edit_quantity_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle quantity edit input."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     try:
         new_quantity = int(update.message.text.strip())
         
         if new_quantity < 0:
-            await update.message.reply_text("❌ Quantity cannot be negative. Try again:")
+            await update.message.reply_text(t("offer_edit_quantity_invalid", lang))
             return EDIT_QUANTITY
         
         # Update offer
@@ -187,8 +197,7 @@ async def handle_edit_quantity_input(update: Update, context: ContextTypes.DEFAU
         updated = await offer_repo.update(offer)
         
         await update.message.reply_text(
-            f"✅ Quantity updated to {new_quantity} units\n\n"
-            "Use /myoffers to see your offers."
+            t("offer_edit_quantity_updated", lang, quantity=new_quantity)
         )
         
         logger.info(
@@ -201,18 +210,23 @@ async def handle_edit_quantity_input(update: Update, context: ContextTypes.DEFAU
     
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid quantity. Enter a whole number:"
+            t("offer_edit_quantity_format", lang)
         )
         return EDIT_QUANTITY
 
 
 async def handle_edit_description_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle description edit input."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     new_description = update.message.text.strip()
     
     if len(new_description) < 10 or len(new_description) > 200:
         await update.message.reply_text(
-            "❌ Description must be 10-200 characters. Try again:"
+            t("offer_edit_desc_invalid", lang)
         )
         return EDIT_DESCRIPTION
     
@@ -225,8 +239,7 @@ async def handle_edit_description_input(update: Update, context: ContextTypes.DE
     updated = await offer_repo.update(offer)
     
     await update.message.reply_text(
-        f"✅ Description updated\n\n"
-        "Use /myoffers to see your offers."
+        t("offer_edit_desc_updated", lang)
     )
     
     logger.info(
@@ -239,6 +252,11 @@ async def handle_edit_description_input(update: Update, context: ContextTypes.DE
 
 async def handle_edit_pickup_end_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle pickup end time edit input."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     time_str = update.message.text.strip()
     
     try:
@@ -264,15 +282,15 @@ async def handle_edit_pickup_end_input(update: Update, context: ContextTypes.DEF
         # Validate it's after start time
         if new_end_time <= offer.pickup_start_time:
             await update.message.reply_text(
-                f"❌ End time must be after start time "
-                f"({offer.pickup_start_time.strftime('%H:%M')}). Try again:"
+                t("offer_edit_pickup_after_start", lang,
+                  start_time=offer.pickup_start_time.strftime('%H:%M'))
             )
             return EDIT_PICKUP_END
         
         # Validate it's in the future
         if new_end_time <= datetime.utcnow():
             await update.message.reply_text(
-                "❌ End time must be in the future. Try again:"
+                t("offer_edit_pickup_future", lang)
             )
             return EDIT_PICKUP_END
         
@@ -280,8 +298,7 @@ async def handle_edit_pickup_end_input(update: Update, context: ContextTypes.DEF
         updated = await offer_repo.update(offer)
         
         await update.message.reply_text(
-            f"✅ Pickup end time updated to {new_end_time.strftime('%H:%M')}\n\n"
-            "Use /myoffers to see your offers."
+            t("offer_edit_pickup_updated", lang, time=new_end_time.strftime('%H:%M'))
         )
         
         logger.info(
@@ -294,19 +311,24 @@ async def handle_edit_pickup_end_input(update: Update, context: ContextTypes.DEF
     
     except (ValueError, IndexError):
         await update.message.reply_text(
-            "❌ Invalid time format. Use HH:MM (e.g., 18:30):"
+            t("offer_edit_pickup_format", lang)
         )
         return EDIT_PICKUP_END
 
 
 async def handle_edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle edit cancellation."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     query = update.callback_query
     if query:
         await query.answer("Cancelled")
-        await query.edit_message_text("✅ Edit cancelled. Use /myoffers to manage offers.")
+        await query.edit_message_text(t("offer_edit_cancelled", lang))
     else:
-        await update.message.reply_text("✅ Edit cancelled. Use /myoffers to manage offers.")
+        await update.message.reply_text(t("offer_edit_cancelled", lang))
     
     return ConversationHandler.END
 

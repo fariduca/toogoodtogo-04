@@ -10,10 +10,12 @@ Commands:
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.business import VerificationStatus
 from src.security.permissions import PermissionChecker
 from src.storage.postgres_business_repo import PostgresBusinessRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -23,11 +25,14 @@ async def list_pending_businesses(
 ) -> None:
     """List all businesses pending verification."""
     user_id = update.effective_user.id
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    lang = get_lang(user) if user else "en"
 
     # Check admin permission
     permission_checker: PermissionChecker = context.bot_data.get("permission_checker")
     if not permission_checker or not permission_checker.can_approve_business(user_id):
-        await update.message.reply_text("❌ You don't have permission to view pending businesses.")
+        await update.message.reply_text(t("approval_no_permission_view", lang))
         return
 
     try:
@@ -37,34 +42,33 @@ async def list_pending_businesses(
 
         # Placeholder response
         await update.message.reply_text(
-            "📋 Pending Businesses:\n\n"
-            "Use /verify <business_id> to approve\n"
-            "Use /reject <business_id> <reason> to reject\n\n"
-            "Database query implementation pending."
+            t("approval_pending_list", lang)
         )
 
         logger.info("pending_businesses_listed", admin_id=user_id)
 
     except Exception as e:
         logger.error("list_pending_failed", error=str(e), exc_info=True)
-        await update.message.reply_text("❌ Failed to retrieve pending businesses.")
+        await update.message.reply_text(t("approval_failed_list", lang))
 
 
 async def approve_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Approve a pending business."""
     user_id = update.effective_user.id
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    lang = get_lang(user) if user else "en"
 
     # Check admin permission
     permission_checker: PermissionChecker = context.bot_data.get("permission_checker")
     if not permission_checker or not permission_checker.can_approve_business(user_id):
-        await update.message.reply_text("❌ You don't have permission to approve businesses.")
+        await update.message.reply_text(t("approval_no_permission", lang))
         return
 
     # Parse business_id from command args
     if not context.args or len(context.args) < 1:
         await update.message.reply_text(
-            "Usage: /verify <business_id>\n"
-            "Example: /verify 123e4567-e89b-12d3-a456-426614174000"
+            t("approval_verify_usage", lang)
         )
         return
 
@@ -82,8 +86,7 @@ async def approve_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
 
         await update.message.reply_text(
-            f"✅ Business {business_id} has been approved!\n\n"
-            "The business owner will be notified and can now create offers."
+            t("approval_approved", lang, business_id=business_id)
         )
 
         # TODO: Send notification to business owner via Telegram
@@ -96,26 +99,27 @@ async def approve_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to approve business {business_id}. "
-            "Please check the business ID and try again."
+            t("approval_failed", lang, business_id=business_id)
         )
 
 
 async def reject_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Reject a pending business."""
     user_id = update.effective_user.id
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    lang = get_lang(user) if user else "en"
 
     # Check admin permission
     permission_checker: PermissionChecker = context.bot_data.get("permission_checker")
     if not permission_checker or not permission_checker.can_approve_business(user_id):
-        await update.message.reply_text("❌ You don't have permission to reject businesses.")
+        await update.message.reply_text(t("approval_no_permission_reject", lang))
         return
 
     # Parse business_id and reason from command args
     if not context.args or len(context.args) < 2:
         await update.message.reply_text(
-            "Usage: /reject <business_id> <reason>\n"
-            "Example: /reject 123e4567-e89b-12d3-a456-426614174000 Incomplete information"
+            t("approval_reject_usage", lang)
         )
         return
 
@@ -135,9 +139,7 @@ async def reject_business(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
 
         await update.message.reply_text(
-            f"❌ Business {business_id} has been rejected.\n\n"
-            f"Reason: {reason}\n\n"
-            "The business owner will be notified."
+            t("approval_rejected", lang, business_id=business_id, reason=reason)
         )
 
         # TODO: Send rejection notification to business owner via Telegram
@@ -150,8 +152,7 @@ async def reject_business(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to reject business {business_id}. "
-            "Please check the business ID and try again."
+            t("approval_reject_failed", lang, business_id=business_id)
         )
 
 

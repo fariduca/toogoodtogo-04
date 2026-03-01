@@ -25,11 +25,23 @@ class MockUpdate:
         self.callback_query.message = Mock()
 
 
+class MockUser:
+    """Mock User model for language resolution."""
+    
+    def __init__(self):
+        self.id = 1
+        self.telegram_user_id = 12345
+        self.language_code = "en"
+
+
 class MockContext:
     """Mock Telegram Context object."""
     
     def __init__(self):
-        self.bot_data = {}
+        _default_user = MockUser()
+        _user_repo = AsyncMock()
+        _user_repo.get_by_telegram_id = AsyncMock(return_value=_default_user)
+        self.bot_data = {"user_repo": _user_repo}
         self.user_data = {}
 
 

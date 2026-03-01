@@ -6,6 +6,7 @@ from math import ceil
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.models.user import UserRole
@@ -26,24 +27,24 @@ async def browse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Get or create user
     user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user)
     
     if not user:
         await update.message.reply_text(
-            "Welcome! Please use /start to register first."
+            t("err_register_first", lang)
         )
         return
     
     # Show filter options
     keyboard = [
-        [InlineKeyboardButton("🌍 All Offers", callback_data="browse:all:0")],
-        [InlineKeyboardButton("📍 Nearby (5km)", callback_data="browse:nearby:0")],
-        [InlineKeyboardButton("⏰ Ending Soon", callback_data="browse:ending:0")],
+        [InlineKeyboardButton(t("btn_browse_all", lang), callback_data="browse:all:0")],
+        [InlineKeyboardButton(t("btn_browse_nearby", lang), callback_data="browse:nearby:0")],
+        [InlineKeyboardButton(t("btn_browse_ending", lang), callback_data="browse:ending:0")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🔍 Browse Deals\n\n"
-        "Choose how you'd like to discover deals:",
+        t("browse_header", lang),
         reply_markup=reply_markup,
     )
 
@@ -53,10 +54,11 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     
+    lang = "en"
     # Parse callback data: browse:{filter}:{page}
     parts = query.data.split(":")
     if len(parts) != 3:
-        await query.edit_message_text("❌ Invalid request")
+        await query.edit_message_text(t("err_invalid_request", lang))
         return
     
     filter_type = parts[1]
@@ -68,14 +70,14 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
     
     telegram_user = update.effective_user
     user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user)
     
     # Get all active offers
     offers = await offer_repo.get_active_offers()
     
     if not offers:
         await query.edit_message_text(
-            "😔 No deals available right now.\n"
-            "Check back soon for new offers!"
+            t("browse_no_deals", lang)
         )
         return
     
@@ -104,8 +106,7 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
             filtered_offers = [offer for offer, _ in filtered_with_distance]
         else:
             await query.edit_message_text(
-                "📍 Location-based filtering requires you to share your location.\n"
-                "Use /browse to try other filters."
+                t("browse_location_required", lang)
             )
             return
     
@@ -116,8 +117,7 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
     if not filtered_offers:
         filter_name = {"all": "matching your criteria", "nearby": "nearby", "ending": "ending soon"}
         await query.edit_message_text(
-            f"😔 No deals {filter_name.get(filter_type, 'available')} right now.\n"
-            "Try a different filter or check back later!"
+            t("browse_no_deals_filter", lang, filter_name=filter_name.get(filter_type, "available"))
         )
         return
     
@@ -129,7 +129,7 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
     page_offers = filtered_offers[start_idx:end_idx]
     
     # Build message with offer cards
-    text = f"🛍️ **Available Deals** (Page {page + 1}/{total_pages})\n\n"
+    text = t("browse_page_header", lang, current=page + 1, total=total_pages) + "\n\n"
     
     keyboard = []
     
@@ -145,8 +145,8 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
         hours_left = int(time_until.total_seconds() / 3600)
         
         card = (
-            f"🏪 **{business.business_name}**\n"
-            f"📦 {offer.title}\n"
+            f"🏪 **{business.business_name}**\n"  # UGC: not translated (FR-007)
+            f"📦 {offer.title}\n"  # UGC: not translated (FR-007)
             f"💰 ${offer.price_per_unit} per unit\n"
             f"📍 {business.venue.city}\n"
             f"⏰ Pickup: {offer.pickup_start_time.strftime('%b %d, %H:%M')} - {offer.pickup_end_time.strftime('%H:%M')}\n"
@@ -154,14 +154,14 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
         )
         
         if hours_left <= 3:
-            card += f" ⚡ Ends in {hours_left}h"
+            card += " " + t("browse_ends_in", lang, hours=hours_left)
         
         text += card + "\n\n"
         
         # Add button for this offer
         keyboard.append([
             InlineKeyboardButton(
-                f"View: {offer.title[:30]}...",
+                t("btn_browse_view", lang, title=offer.title[:30]),
                 callback_data=f"offer_detail:{offer.id}",
             )
         ])
@@ -170,11 +170,11 @@ async def handle_browse_callback(update: Update, context: ContextTypes.DEFAULT_T
     nav_buttons = []
     if page > 0:
         nav_buttons.append(
-            InlineKeyboardButton("⬅️ Previous", callback_data=f"browse:{filter_type}:{page - 1}")
+            InlineKeyboardButton(t("btn_browse_prev", lang), callback_data=f"browse:{filter_type}:{page - 1}")
         )
     if page < total_pages - 1:
         nav_buttons.append(
-            InlineKeyboardButton("➡️ Next", callback_data=f"browse:{filter_type}:{page + 1}")
+            InlineKeyboardButton(t("btn_browse_next", lang), callback_data=f"browse:{filter_type}:{page + 1}")
         )
     
     if nav_buttons:
@@ -195,34 +195,40 @@ async def handle_offer_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     from uuid import UUID
     offer_id = UUID(offer_id_str)
     
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    user = await user_repo.get_by_telegram_id(update.effective_user.id)
+    lang = get_lang(user)
+    
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
     business_repo: PostgresBusinessRepository = context.bot_data["business_repo"]
     
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer or not offer.available_for_reservation:
-        await query.edit_message_text("❌ This offer is no longer available.")
+        await query.edit_message_text(t("err_offer_unavailable", lang))
         return
     
     business = await business_repo.get_by_id(offer.business_id)
     
     if not business:
-        await query.edit_message_text("❌ Business information not found.")
+        await query.edit_message_text(t("err_business_info_not_found", lang))
         return
     
     # Build detailed message
-    text = (
-        f"🏪 **{business.business_name}**\n\n"
-        f"📦 **{offer.title}**\n"
-        f"{offer.description}\n\n"
-        f"💰 **Price:** ${offer.price_per_unit} per unit\n"
-        f"📊 **Available:** {offer.quantity_remaining}/{offer.quantity_total} units\n"
-        f"📍 **Location:** {business.venue.street_address}, {business.venue.city} {business.venue.postal_code}\n"
-        f"📞 **Contact:** {business.contact_phone or 'N/A'}\n"
-        f"🕐 **Pickup Window:**\n"
-        f"   {offer.pickup_start_time.strftime('%B %d, %Y at %H:%M')} -\n"
-        f"   {offer.pickup_end_time.strftime('%H:%M')}\n\n"
-        f"💳 **Payment:** On-site (cash or card)\n"
+    text = t(
+        "browse_offer_detail_header", lang,
+        business_name=business.business_name,  # UGC: not translated (FR-007)
+        title=offer.title,  # UGC: not translated (FR-007)
+        description=offer.description,  # UGC: not translated (FR-007)
+        price=offer.price_per_unit,
+        remaining=offer.quantity_remaining,
+        total=offer.quantity_total,
+        address=business.venue.street_address,
+        city=business.venue.city,
+        postal=business.venue.postal_code,
+        phone=business.contact_phone or "N/A",
+        pickup_start=offer.pickup_start_time.strftime("%B %d, %Y at %H:%M"),
+        pickup_end=offer.pickup_end_time.strftime("%H:%M"),
     )
     
     # Quantity selector buttons
@@ -238,7 +244,7 @@ async def handle_offer_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
         if qty <= offer.quantity_remaining:
             quantity_buttons.append(
                 InlineKeyboardButton(
-                    f"{qty} unit{'s' if qty > 1 else ''}",
+                    t("btn_unit_plural" if qty > 1 else "btn_unit_singular", lang, qty=qty),
                     callback_data=f"reserve:{offer_id}:{qty}",
                 )
             )
@@ -248,7 +254,7 @@ async def handle_offer_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard.append(quantity_buttons[i:i+3])
     
     keyboard.append([
-        InlineKeyboardButton("« Back to Browse", callback_data="browse:all:0")
+        InlineKeyboardButton(t("btn_back_browse", lang), callback_data="browse:all:0")
     ])
     
     reply_markup = InlineKeyboardMarkup(keyboard)

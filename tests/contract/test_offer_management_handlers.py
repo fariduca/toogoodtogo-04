@@ -33,18 +33,6 @@ class MockUpdate:
         self.callback_query.message = Mock()
 
 
-class MockContext:
-    """Mock Telegram Context object."""
-    
-    def __init__(self):
-        self.bot_data = {
-            "business_repo": AsyncMock(),
-            "offer_repo": AsyncMock(),
-        }
-        self.user_data = {}
-        self.bot = Mock()
-
-
 class MockUser:
     """Mock User model."""
     
@@ -52,6 +40,23 @@ class MockUser:
         self.id = user_id
         self.telegram_user_id = 12345
         self.role = role
+        self.language_code = "en"
+
+
+class MockContext:
+    """Mock Telegram Context object."""
+    
+    def __init__(self):
+        _default_user = MockUser()
+        _user_repo = AsyncMock()
+        _user_repo.get_by_telegram_id = AsyncMock(return_value=_default_user)
+        self.bot_data = {
+            "business_repo": AsyncMock(),
+            "offer_repo": AsyncMock(),
+            "user_repo": _user_repo,
+        }
+        self.user_data = {}
+        self.bot = Mock()
 
 
 class MockBusiness:

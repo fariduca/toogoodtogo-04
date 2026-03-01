@@ -3,6 +3,7 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.reservation import ReservationStatus
 from src.models.user import UserRole
@@ -23,7 +24,7 @@ async def handle_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # Parse callback data: reserve:{offer_id}:{quantity}
     parts = query.data.split(":")
     if len(parts) != 3:
-        await query.edit_message_text("❌ Invalid reservation request")
+        await query.edit_message_text(t("reserve_invalid_request", "en"))
         return
     
     from uuid import UUID
@@ -38,29 +39,30 @@ async def handle_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user = await user_repo.get_by_telegram_id(telegram_user.id)
     
     if not user:
-        await query.edit_message_text("❌ Please use /start to register first.")
+        await query.edit_message_text(t("err_register_first", "en"))
         return
     
+    lang = get_lang(user)
+    
     if user.role != UserRole.CUSTOMER:
-        await query.edit_message_text("❌ Only customers can make reservations.")
+        await query.edit_message_text(t("reserve_customers_only", lang))
         return
     
     # Get offer and business details
     offer = await offer_repo.get_by_id(offer_id)
     if not offer or not offer.available_for_reservation:
-        await query.edit_message_text("❌ This offer is no longer available.")
+        await query.edit_message_text(t("err_offer_unavailable", lang))
         return
     
     business = await business_repo.get_by_id(offer.business_id)
     if not business:
-        await query.edit_message_text("❌ Business not found.")
+        await query.edit_message_text(t("err_business_not_found", lang))
         return
     
     # Validate quantity
     if quantity > offer.quantity_remaining:
         await query.edit_message_text(
-            f"❌ Only {offer.quantity_remaining} units available.\n"
-            "Please try again with a lower quantity."
+            t("reserve_quantity_exceeded", lang, remaining=offer.quantity_remaining)
         )
         return
     
@@ -68,24 +70,22 @@ async def handle_reserve(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     total_price = float(offer.price_per_unit) * quantity
     
     # Show confirmation prompt
-    text = (
-        "📋 **Confirm Reservation**\n\n"
-        f"**Deal:** {offer.title}\n"
-        f"**Business:** {business.business_name}\n"
-        f"**Quantity:** {quantity} unit{'s' if quantity > 1 else ''}\n"
-        f"**Total:** ${total_price:.2f}\n\n"
-        f"**Pickup at:**\n"
-        f"{business.venue.street_address}\n"
-        f"{business.venue.city}, {business.venue.postal_code}\n\n"
-        f"**Pickup Window:**\n"
-        f"{offer.pickup_start_time.strftime('%b %d, %H:%M')} - {offer.pickup_end_time.strftime('%H:%M')}\n\n"
-        f"💳 **Payment on-site** (cash or card)\n\n"
-        "Ready to reserve?"
+    text = t(
+        "reserve_confirm_prompt", lang,
+        title=offer.title,
+        business_name=business.business_name,
+        quantity=quantity,
+        total=f"${total_price:.2f}",
+        address=business.venue.street_address,
+        city=business.venue.city,
+        postal=business.venue.postal_code,
+        pickup_start=offer.pickup_start_time.strftime('%b %d, %H:%M'),
+        pickup_end=offer.pickup_end_time.strftime('%H:%M'),
     )
     
     keyboard = [
-        [InlineKeyboardButton("✅ Confirm Reservation", callback_data=f"confirm_reserve:{offer_id}:{quantity}")],
-        [InlineKeyboardButton("« Back", callback_data=f"offer_detail:{offer_id}")],
+        [InlineKeyboardButton(t("btn_confirm_reserve", lang), callback_data=f"confirm_reserve:{offer_id}:{quantity}")],
+        [InlineKeyboardButton(t("btn_cancel", lang), callback_data=f"offer_detail:{offer_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -100,7 +100,7 @@ async def handle_confirm_reserve(update: Update, context: ContextTypes.DEFAULT_T
     # Parse callback data: confirm_reserve:{offer_id}:{quantity}
     parts = query.data.split(":")
     if len(parts) != 3:
-        await query.edit_message_text("❌ Invalid confirmation request")
+        await query.edit_message_text(t("reserve_invalid_confirmation", "en"))
         return
     
     from uuid import UUID
@@ -116,8 +116,10 @@ async def handle_confirm_reserve(update: Update, context: ContextTypes.DEFAULT_T
     user = await user_repo.get_by_telegram_id(telegram_user.id)
     
     if not user:
-        await query.edit_message_text("❌ User not found.")
+        await query.edit_message_text(t("err_register_first", "en"))
         return
+    
+    lang = get_lang(user)
     
     # Create reservation with atomic inventory management
     if not reservation_flow_service:
@@ -128,13 +130,13 @@ async def handle_confirm_reserve(update: Update, context: ContextTypes.DEFAULT_T
         offer = await offer_repo.get_by_id(offer_id)
         
         if not offer or quantity > offer.quantity_remaining:
-            await query.edit_message_text("❌ Reservation failed. Offer no longer available.")
+            await query.edit_message_text(t("reserve_failed", lang))
             return
         
         # Decrement inventory
         success = await offer_repo.decrement_quantity(offer_id, quantity)
         if not success:
-            await query.edit_message_text("❌ Failed to reserve. Please try again.")
+            await query.edit_message_text(t("reserve_decrement_failed", lang))
             return
         
         # Create reservation
@@ -168,9 +170,7 @@ async def handle_confirm_reserve(update: Update, context: ContextTypes.DEFAULT_T
     
     if not success:
         await query.edit_message_text(
-            f"❌ {message}\n\n"
-            "The deal may have just sold out or is locked by another customer. "
-            "Please try again or browse other offers."
+            t("reserve_locked_out", lang, message=message)
         )
         return
     
@@ -181,27 +181,24 @@ async def handle_confirm_reserve(update: Update, context: ContextTypes.DEFAULT_T
     total_price = float(offer.price_per_unit) * quantity
     
     # Send success message
-    text = (
-        "🎉 **Reservation Confirmed!**\n\n"
-        f"**Order ID:** `{order_id}`\n"
-        f"**Deal:** {offer.title}\n"
-        f"**Quantity:** {quantity} unit{'s' if quantity > 1 else ''}\n"
-        f"**Amount to Pay:** ${total_price:.2f}\n\n"
-        "📍 **Pickup Location:**\n"
-        f"{business.business_name}\n"
-        f"{business.venue.street_address}\n"
-        f"{business.venue.city}, {business.venue.postal_code}\n"
-        f"📞 {business.contact_phone or 'N/A'}\n\n"
-        "🕐 **Pickup Window:**\n"
-        f"{offer.pickup_start_time.strftime('%b %d, %H:%M')} - {offer.pickup_end_time.strftime('%H:%M')}\n\n"
-        "💳 **Payment:** Pay on-site (cash or card)\n\n"
-        "📱 Show this Order ID when picking up your order.\n"
-        "Use /myreservations to view all your reservations."
+    text = t(
+        "reserve_confirmed", lang,
+        order_id=order_id,
+        title=offer.title,
+        quantity=quantity,
+        total=f"${total_price:.2f}",
+        business_name=business.business_name,
+        address=business.venue.street_address,
+        city=business.venue.city,
+        postal=business.venue.postal_code,
+        phone=business.contact_phone or 'N/A',
+        pickup_start=offer.pickup_start_time.strftime('%b %d, %H:%M'),
+        pickup_end=offer.pickup_end_time.strftime('%H:%M'),
     )
     
     keyboard = [
-        [InlineKeyboardButton("🛍️ Browse More Deals", callback_data="browse:all:0")],
-        [InlineKeyboardButton("📋 My Reservations", callback_data="my_reservations")],
+        [InlineKeyboardButton(t("btn_browse_more", lang), callback_data="browse:all:0")],
+        [InlineKeyboardButton(t("btn_my_reservations", lang), callback_data="my_reservations")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -227,20 +224,19 @@ async def my_reservations_command(update: Update, context: ContextTypes.DEFAULT_
     user = await user_repo.get_by_telegram_id(telegram_user.id)
     
     if not user:
-        await update.message.reply_text("❌ Please use /start to register first.")
+        await update.message.reply_text(t("err_register_first", "en"))
         return
+    
+    lang = get_lang(user)
     
     # Get active reservations
     reservations = await reservation_repo.get_active_by_customer(user.id)
     
     if not reservations:
-        await update.message.reply_text(
-            "📭 You don't have any active reservations.\n\n"
-            "Use /browse to discover deals!"
-        )
+        await update.message.reply_text(t("reserve_my_empty", lang))
         return
     
-    text = "📋 **Your Reservations**\n\n"
+    text = t("reserve_my_header", lang)
     
     for reservation in reservations:
         offer = await offer_repo.get_by_id(reservation.offer_id)
@@ -268,7 +264,7 @@ async def my_reservations_command(update: Update, context: ContextTypes.DEFAULT_
         
         if now < reservation.pickup_end_time:
             keyboard.append([
-                InlineKeyboardButton("🗑️ Cancel Reservation", callback_data=f"cancel_reservation:{reservation.id}")
+                InlineKeyboardButton(t("btn_cancel_reservation", lang), callback_data=f"cancel_reservation:{reservation.id}")
             ])
         
         if keyboard:

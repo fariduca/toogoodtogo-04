@@ -18,6 +18,7 @@ from telegram.ext import (
     filters,
 )
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.business import BusinessInput, Venue, VerificationStatus
 from src.storage.image_store import ImageStoreProtocol
@@ -32,23 +33,23 @@ NAME, ADDRESS, COORDINATES, PHOTO = range(4)
 async def register_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start business registration conversation."""
     user = update.effective_user
+    lang = context.user_data.get("lang", "en")
     logger.info("registration_started", user_id=user.id, username=user.username)
 
     await update.message.reply_text(
-        "Welcome to business registration! 🏪\n\n"
-        "Let's get your business set up to post offers.\n\n"
-        "First, what is your business name?"
+        t("reg_welcome", lang)
     )
     return NAME
 
 
 async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receive and validate business name."""
+    lang = context.user_data.get("lang", "en")
     business_name = update.message.text.strip()
 
     if len(business_name) < 3 or len(business_name) > 100:
         await update.message.reply_text(
-            "Business name must be between 3 and 100 characters. Please try again:"
+            t("reg_name_validation", lang)
         )
         return NAME
 
@@ -56,21 +57,19 @@ async def receive_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     logger.info("business_name_received", name=business_name)
 
     await update.message.reply_text(
-        f"Great! Business name: {business_name}\n\n"
-        "Now, please provide your venue address.\n"
-        "Format: Street Address, City\n"
-        "Example: 123 Main St, Springfield"
+        t("reg_name_received", lang, name=business_name)
     )
     return ADDRESS
 
 
 async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receive venue address."""
+    lang = context.user_data.get("lang", "en")
     address = update.message.text.strip()
 
     if len(address) < 5:
         await update.message.reply_text(
-            "Please provide a valid address (minimum 5 characters):"
+            t("reg_address_validation", lang)
         )
         return ADDRESS
 
@@ -78,10 +77,7 @@ async def receive_address(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     logger.info("address_received", address=address)
 
     await update.message.reply_text(
-        "Perfect! Now I need the coordinates of your venue.\n\n"
-        "Please send your location using Telegram's location sharing feature, "
-        "or provide coordinates in the format: latitude, longitude\n"
-        "Example: 37.7749, -122.4194"
+        t("reg_ask_coordinates", lang)
     )
     return COORDINATES
 
@@ -90,6 +86,7 @@ async def receive_coordinates(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     """Receive venue coordinates from location or text."""
+    lang = context.user_data.get("lang", "en")
     if update.message.location:
         # Location shared via Telegram
         lat = update.message.location.latitude
@@ -105,16 +102,14 @@ async def receive_coordinates(
             lon = float(parts[1])
         except (ValueError, IndexError):
             await update.message.reply_text(
-                "Invalid coordinates format. Please use: latitude, longitude\n"
-                "Or share your location using Telegram's location feature."
+                t("reg_coordinates_invalid", lang)
             )
             return COORDINATES
 
     # Validate coordinate ranges
     if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
         await update.message.reply_text(
-            "Coordinates out of valid range.\n"
-            "Latitude: -90 to 90, Longitude: -180 to 180"
+            t("reg_coordinates_range", lang)
         )
         return COORDINATES
 
@@ -123,18 +118,17 @@ async def receive_coordinates(
     logger.info("coordinates_received", lat=lat, lon=lon)
 
     await update.message.reply_text(
-        f"Location confirmed: {lat}, {lon}\n\n"
-        "Finally, please upload a photo of your business.\n"
-        "This helps customers recognize your venue."
+        t("reg_coordinates_confirmed", lang, lat=lat, lon=lon)
     )
     return PHOTO
 
 
 async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Receive business photo and complete registration."""
+    lang = context.user_data.get("lang", "en")
     if not update.message.photo:
         await update.message.reply_text(
-            "Please send a photo of your business (not a file or other media)."
+            t("reg_photo_prompt", lang)
         )
         return PHOTO
 
@@ -170,17 +164,13 @@ async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
 
         await update.message.reply_text(
-            "✅ Registration complete!\n\n"
-            f"Business: {business_input.name}\n"
-            f"Address: {business_input.venue.address}\n\n"
-            "Your application is now pending admin verification.\n"
-            "You'll be notified once approved. Thank you!"
+            t("reg_complete", lang, name=business_input.name, address=business_input.venue.address)
         )
 
     except Exception as e:
         logger.error("registration_failed", error=str(e), exc_info=True)
         await update.message.reply_text(
-            "❌ Registration failed. Please try again later or contact support."
+            t("reg_failed", lang)
         )
 
     # Clear user data
@@ -192,8 +182,9 @@ async def cancel_registration(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     """Cancel registration conversation."""
+    lang = context.user_data.get("lang", "en")
     await update.message.reply_text(
-        "Registration cancelled. Use /register to start again."
+        t("reg_cancelled", lang)
     )
     context.user_data.clear()
     return ConversationHandler.END

@@ -5,6 +5,7 @@ from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.models.user import UserRole
@@ -25,16 +26,17 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # Get user
     user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     if not user:
         await update.message.reply_text(
-            "❌ You need to register first. Use /start to begin."
+            t("err_register_first", lang)
         )
         return
     
     if user.role != UserRole.BUSINESS:
         await update.message.reply_text(
-            "❌ Only business accounts can manage offers."
+            t("offer_mgmt_business_only", lang)
         )
         return
     
@@ -43,7 +45,7 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     if not businesses:
         await update.message.reply_text(
-            "❌ You don't have a registered business yet."
+            t("offer_mgmt_no_business", lang)
         )
         return
     
@@ -54,8 +56,7 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     if not offers:
         await update.message.reply_text(
-            f"📦 You haven't posted any offers yet for {business.business_name}.\n\n"
-            "Use /newdeal to create your first offer!"
+            t("offer_mgmt_empty", lang, business_name=business.business_name)
         )
         return
     
@@ -71,7 +72,7 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         reverse=True
     )
     
-    message_lines = [f"📦 **Your Offers** ({len(offers)} total)\n"]
+    message_lines = [t("offer_mgmt_header", lang, count=len(offers))]
     
     for offer in offers:
         # Status indicator
@@ -87,9 +88,9 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # Time info
         now = datetime.utcnow()
         if offer.pickup_end_time > now:
-            time_info = f"Until {offer.pickup_end_time.strftime('%H:%M')}"
+            time_info = t("offer_mgmt_time_until", lang, time=offer.pickup_end_time.strftime('%H:%M'))
         else:
-            time_info = "Expired"
+            time_info = t("offer_mgmt_expired", lang)
         
         # Build offer card
         message_lines.append(
@@ -104,19 +105,19 @@ async def myoffers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         if offer.state == OfferStatus.ACTIVE:
             keyboard.append([
-                InlineKeyboardButton("⏸️ Pause", callback_data=f"pause_offer:{offer.id}"),
-                InlineKeyboardButton("✏️ Edit", callback_data=f"edit_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_pause_offer", lang), callback_data=f"pause_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_edit_offer", lang), callback_data=f"edit_offer:{offer.id}"),
             ])
             keyboard.append([
-                InlineKeyboardButton("🛑 End Now", callback_data=f"end_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_end_offer", lang), callback_data=f"end_offer:{offer.id}"),
             ])
         elif offer.state == OfferStatus.PAUSED:
             keyboard.append([
-                InlineKeyboardButton("▶️ Resume", callback_data=f"resume_offer:{offer.id}"),
-                InlineKeyboardButton("✏️ Edit", callback_data=f"edit_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_resume_offer", lang), callback_data=f"resume_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_edit_offer", lang), callback_data=f"edit_offer:{offer.id}"),
             ])
             keyboard.append([
-                InlineKeyboardButton("🛑 End Now", callback_data=f"end_offer:{offer.id}"),
+                InlineKeyboardButton(t("btn_end_offer", lang), callback_data=f"end_offer:{offer.id}"),
             ])
         
         if keyboard:

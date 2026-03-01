@@ -16,6 +16,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from src.i18n import t
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.security.permissions import PermissionChecker
@@ -30,13 +31,13 @@ EDIT_SELECT_ACTION, EDIT_PRICE, EDIT_QUANTITY, EDIT_ITEM_SELECT = range(4)
 
 async def start_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start offer editing process."""
+    lang = context.user_data.get("lang", "en")
     user_id = update.effective_user.id
 
     # Parse offer_id from command args
     if not context.args or len(context.args) < 1:
         await update.message.reply_text(
-            "Usage: /edit <offer_id>\n"
-            "Example: /edit 123e4567-e89b-12d3-a456-426614174000"
+            t("offer_lifecycle_edit_usage", lang)
         )
         return ConversationHandler.END
 
@@ -48,7 +49,7 @@ async def start_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         context.user_data["edit_offer_id"] = offer_id
     except ValueError:
         await update.message.reply_text(
-            f"❌ Invalid offer ID format: {offer_id_str}"
+            t("offer_lifecycle_edit_invalid_id", lang, offer_id=offer_id_str)
         )
         return ConversationHandler.END
 
@@ -64,7 +65,7 @@ async def start_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
                 if not offer:
                     await update.message.reply_text(
-                        f"❌ Offer not found: {offer_id_str}"
+                        t("offer_lifecycle_edit_not_found", lang, offer_id=offer_id_str)
                     )
                     return ConversationHandler.END
 
@@ -79,29 +80,27 @@ async def start_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
                     offer.business_id, offer_id, user_id
                 ):
                     await update.message.reply_text(
-                        "❌ You don't have permission to edit this offer."
+                        t("offer_lifecycle_edit_no_permission", lang)
                     )
                     return ConversationHandler.END
 
                 # Check offer is editable
                 if offer.status not in [OfferStatus.ACTIVE, OfferStatus.PAUSED]:
                     await update.message.reply_text(
-                        f"❌ Cannot edit offer in {offer.status.value} status.\n"
-                        f"Only active or paused offers can be edited."
+                        t("offer_lifecycle_edit_cannot", lang, status=offer.status.value)
                     )
                     return ConversationHandler.END
 
                 # Show edit options
                 keyboard = [
-                    [InlineKeyboardButton("📝 Edit Item Prices", callback_data="edit_price")],
-                    [InlineKeyboardButton("📦 Edit Item Quantities", callback_data="edit_quantity")],
-                    [InlineKeyboardButton("❌ Cancel", callback_data="edit_cancel")],
+                    [InlineKeyboardButton(t("btn_edit_item_prices", lang), callback_data="edit_price")],
+                    [InlineKeyboardButton(t("btn_edit_item_quantities", lang), callback_data="edit_quantity")],
+                    [InlineKeyboardButton(t("btn_cancel", lang), callback_data="edit_cancel")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
 
                 await update.message.reply_text(
-                    f"**Edit Offer: {offer.title}**\n\n"
-                    f"What would you like to edit?",
+                    t("offer_lifecycle_edit_header", lang, title=offer.title),
                     reply_markup=reply_markup,
                     parse_mode="Markdown",
                 )
@@ -119,20 +118,21 @@ async def start_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to start editing.\nError: {str(e)}"
+            t("offer_lifecycle_edit_failed", lang, error=str(e))
         )
         return ConversationHandler.END
 
 
 async def select_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle edit action selection."""
+    lang = context.user_data.get("lang", "en")
     query = update.callback_query
     await query.answer()
 
     action = query.data
 
     if action == "edit_cancel":
-        await query.edit_message_text("✅ Edit canceled.")
+        await query.edit_message_text(t("offer_lifecycle_edit_cancelled", lang))
         return ConversationHandler.END
 
     offer = context.user_data.get("edit_offer")
@@ -147,11 +147,11 @@ async def select_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     callback_data=f"edit_price_{item.name}"
                 )
             ])
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="edit_cancel")])
+        keyboard.append([InlineKeyboardButton(t("btn_cancel", lang), callback_data="edit_cancel")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "Select an item to edit price:",
+            t("offer_lifecycle_edit_select_price", lang),
             reply_markup=reply_markup,
         )
         return EDIT_PRICE
@@ -166,11 +166,11 @@ async def select_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     callback_data=f"edit_qty_{item.name}"
                 )
             ])
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="edit_cancel")])
+        keyboard.append([InlineKeyboardButton(t("btn_cancel", lang), callback_data="edit_cancel")])
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         await query.edit_message_text(
-            "Select an item to edit quantity:",
+            t("offer_lifecycle_edit_select_qty", lang),
             reply_markup=reply_markup,
         )
         return EDIT_QUANTITY
@@ -180,11 +180,12 @@ async def select_edit_action(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def edit_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle item price editing."""
+    lang = context.user_data.get("lang", "en")
     query = update.callback_query
     await query.answer()
 
     if query.data == "edit_cancel":
-        await query.edit_message_text("✅ Edit canceled.")
+        await query.edit_message_text(t("offer_lifecycle_edit_cancelled", lang))
         return ConversationHandler.END
 
     # Extract item name
@@ -195,13 +196,11 @@ async def edit_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     item = next((i for i in offer.items if i.name == item_name), None)
 
     if not item:
-        await query.edit_message_text("❌ Item not found.")
+        await query.edit_message_text(t("offer_lifecycle_edit_item_not_found", lang))
         return ConversationHandler.END
 
     await query.edit_message_text(
-        f"**Edit Price: {item_name}**\n\n"
-        f"Current price: ${item.discounted_price}\n\n"
-        f"Enter new price (e.g., 5.99):",
+        t("offer_lifecycle_edit_price_prompt", lang, item_name=item_name, price=str(item.discounted_price)),
         parse_mode="Markdown",
     )
 
@@ -210,12 +209,13 @@ async def edit_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def update_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Update item price with user input."""
+    lang = context.user_data.get("lang", "en")
     try:
         new_price = Decimal(update.message.text.strip())
 
         if new_price < 0:
             await update.message.reply_text(
-                "❌ Price cannot be negative. Please try again."
+                t("offer_lifecycle_edit_price_negative", lang)
             )
             return EDIT_PRICE
 
@@ -242,8 +242,7 @@ async def update_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 await session.commit()
 
                 await update.message.reply_text(
-                    f"✅ Price updated successfully!\n\n"
-                    f"**{item_name}**: ${new_price}"
+                    t("offer_lifecycle_edit_price_updated", lang, item_name=item_name, price=str(new_price))
                 )
 
         finally:
@@ -253,24 +252,25 @@ async def update_item_price(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     except (ValueError, InvalidOperation):
         await update.message.reply_text(
-            "❌ Invalid price format. Please enter a number (e.g., 5.99)."
+            t("offer_lifecycle_edit_price_invalid", lang)
         )
         return EDIT_PRICE
     except Exception as e:
         logger.error("price_update_failed", error=str(e), exc_info=True)
         await update.message.reply_text(
-            f"❌ Failed to update price.\nError: {str(e)}"
+            t("offer_lifecycle_edit_price_failed", lang, error=str(e))
         )
         return ConversationHandler.END
 
 
 async def edit_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle item quantity editing."""
+    lang = context.user_data.get("lang", "en")
     query = update.callback_query
     await query.answer()
 
     if query.data == "edit_cancel":
-        await query.edit_message_text("✅ Edit canceled.")
+        await query.edit_message_text(t("offer_lifecycle_edit_cancelled", lang))
         return ConversationHandler.END
 
     # Extract item name
@@ -281,13 +281,11 @@ async def edit_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE)
     item = next((i for i in offer.items if i.name == item_name), None)
 
     if not item:
-        await query.edit_message_text("❌ Item not found.")
+        await query.edit_message_text(t("offer_lifecycle_edit_item_not_found", lang))
         return ConversationHandler.END
 
     await query.edit_message_text(
-        f"**Edit Quantity: {item_name}**\n\n"
-        f"Current quantity: {item.quantity}\n\n"
-        f"Enter new quantity:",
+        t("offer_lifecycle_edit_qty_prompt", lang, item_name=item_name, quantity=str(item.quantity)),
         parse_mode="Markdown",
     )
 
@@ -296,12 +294,13 @@ async def edit_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def update_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Update item quantity with user input."""
+    lang = context.user_data.get("lang", "en")
     try:
         new_quantity = int(update.message.text.strip())
 
         if new_quantity < 0:
             await update.message.reply_text(
-                "❌ Quantity cannot be negative. Please try again."
+                t("offer_lifecycle_edit_qty_negative", lang)
             )
             return EDIT_QUANTITY
 
@@ -328,8 +327,7 @@ async def update_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYP
                 await session.commit()
 
                 await update.message.reply_text(
-                    f"✅ Quantity updated successfully!\n\n"
-                    f"**{item_name}**: {new_quantity} available"
+                    t("offer_lifecycle_edit_qty_updated", lang, item_name=item_name, quantity=str(new_quantity))
                 )
 
         finally:
@@ -339,20 +337,21 @@ async def update_item_quantity(update: Update, context: ContextTypes.DEFAULT_TYP
 
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid quantity. Please enter a whole number."
+            t("offer_lifecycle_edit_qty_invalid", lang)
         )
         return EDIT_QUANTITY
     except Exception as e:
         logger.error("quantity_update_failed", error=str(e), exc_info=True)
         await update.message.reply_text(
-            f"❌ Failed to update quantity.\nError: {str(e)}"
+            t("offer_lifecycle_edit_qty_failed", lang, error=str(e))
         )
         return ConversationHandler.END
 
 
 async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the edit conversation."""
-    await update.message.reply_text("✅ Edit canceled.")
+    lang = context.user_data.get("lang", "en")
+    await update.message.reply_text(t("offer_lifecycle_edit_cancelled", lang))
     return ConversationHandler.END
 
 

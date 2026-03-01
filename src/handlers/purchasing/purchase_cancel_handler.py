@@ -9,9 +9,11 @@ from datetime import datetime
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.purchase import PurchaseStatus
 from src.storage.postgres_purchase_repo import PostgresPurchaseRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -20,12 +22,14 @@ async def cancel_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Cancel a purchase before pickup time."""
     user_id = update.effective_user.id
 
+    # Resolve user language
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    lang = get_lang(user) if user else "en"
+
     # Parse purchase_id from command args
     if not context.args or len(context.args) < 1:
-        await update.message.reply_text(
-            "Usage: /cancel <purchase_id>\n"
-            "Example: /cancel 123e4567-e89b-12d3-a456-426614174000"
-        )
+        await update.message.reply_text(t("purchase_cancel_usage", lang))
         return
 
     purchase_id = context.args[0]
@@ -70,9 +74,7 @@ async def cancel_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         logger.info("purchase_canceled", user_id=user_id, purchase_id=purchase_id)
 
         await update.message.reply_text(
-            f"✅ Purchase {purchase_id} has been canceled.\n\n"
-            "The items have been returned to inventory.\n"
-            "No refund needed (cash payment at venue)."
+            t("purchase_cancelled", lang, purchase_id=purchase_id)
         )
 
     except Exception as e:
@@ -83,7 +85,7 @@ async def cancel_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to cancel purchase {purchase_id}. Please try again."
+            t("purchase_cancel_failed", lang, purchase_id=purchase_id)
         )
 
 

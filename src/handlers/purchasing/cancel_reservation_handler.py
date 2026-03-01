@@ -6,10 +6,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from uuid import UUID
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.reservation import ReservationStatus
 from src.storage.postgres_reservation_repo import PostgresReservationRepository
 from src.storage.postgres_offer_repo import PostgresOfferRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -21,6 +23,12 @@ async def handle_cancel_reservation(update: Update, context: ContextTypes.DEFAUL
     
     reservation_repo: PostgresReservationRepository = context.bot_data["reservation_repo"]
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract reservation_id from callback_data (format: "cancel_reservation:uuid")
     reservation_id_str = query.data.split(":")[1]
@@ -30,13 +38,13 @@ async def handle_cancel_reservation(update: Update, context: ContextTypes.DEFAUL
     reservation = await reservation_repo.get_by_id(reservation_id)
     
     if not reservation:
-        await query.edit_message_text("❌ Reservation not found.")
+        await query.edit_message_text(t("err_reservation_not_found", lang))
         return
     
     # Validate reservation status
     if reservation.status != ReservationStatus.CONFIRMED:
         await query.edit_message_text(
-            f"❌ This reservation has already been {reservation.status.value.lower()}."
+            t("reserve_already_status", lang, status=reservation.status.value.lower())
         )
         return
     
@@ -44,8 +52,7 @@ async def handle_cancel_reservation(update: Update, context: ContextTypes.DEFAUL
     now = datetime.utcnow()
     if now >= reservation.pickup_end_time:
         await query.edit_message_text(
-            "❌ Cannot cancel reservation after the pickup window has ended.\n\n"
-            f"Pickup window ended at {reservation.pickup_end_time.strftime('%H:%M')}."
+            t("reserve_cancel_expired", lang, end_time=reservation.pickup_end_time.strftime('%H:%M'))
         )
         return
     
@@ -53,26 +60,24 @@ async def handle_cancel_reservation(update: Update, context: ContextTypes.DEFAUL
     offer = await offer_repo.get_by_id(reservation.offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Associated offer not found.")
+        await query.edit_message_text(t("err_reservation_not_found", lang))
         return
     
     # Show confirmation prompt
     keyboard = [
         [
-            InlineKeyboardButton("✅ Yes, cancel", callback_data=f"confirm_cancel_reservation:{reservation_id}"),
-            InlineKeyboardButton("❌ Keep reservation", callback_data=f"keep_reservation:{reservation_id}"),
+            InlineKeyboardButton(t("btn_yes_cancel", lang), callback_data=f"confirm_cancel_reservation:{reservation_id}"),
+            InlineKeyboardButton(t("btn_keep_reservation", lang), callback_data=f"keep_reservation:{reservation_id}"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"🗑️ **Cancel Reservation?**\n\n"
-        f"**Order ID:** `{reservation.order_id}`\n"
-        f"**Deal:** {offer.title}\n"
-        f"**Quantity:** {reservation.quantity} units\n"
-        f"**Total:** €{reservation.total_price}\n\n"
-        "⚠️ Cancelling will return the items to inventory for others to reserve.\n\n"
-        "Are you sure you want to cancel?",
+        t("reserve_cancel_prompt", lang,
+          order_id=reservation.order_id,
+          title=offer.title,
+          quantity=reservation.quantity,
+          total=f"€{reservation.total_price}"),
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -85,6 +90,12 @@ async def handle_confirm_cancel_reservation(update: Update, context: ContextType
     
     reservation_repo: PostgresReservationRepository = context.bot_data["reservation_repo"]
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract reservation_id from callback_data (format: "confirm_cancel_reservation:uuid")
     reservation_id_str = query.data.split(":")[1]
@@ -94,14 +105,14 @@ async def handle_confirm_cancel_reservation(update: Update, context: ContextType
     reservation = await reservation_repo.get_by_id(reservation_id)
     
     if not reservation:
-        await query.edit_message_text("❌ Reservation not found.")
+        await query.edit_message_text(t("err_reservation_not_found", lang))
         return
     
     # Validate time again
     now = datetime.utcnow()
     if now >= reservation.pickup_end_time:
         await query.edit_message_text(
-            "❌ Cannot cancel reservation after the pickup window has ended."
+            t("reserve_cancel_expired_short", lang)
         )
         return
     
@@ -113,10 +124,7 @@ async def handle_confirm_cancel_reservation(update: Update, context: ContextType
         )
         
         await query.edit_message_text(
-            f"✅ **Reservation Cancelled**\n\n"
-            f"Order ID `{reservation.order_id}` has been cancelled.\n"
-            f"{reservation.quantity} units have been returned to inventory.\n\n"
-            "Use /browse to find other deals!",
+            t("reserve_cancelled_success", lang, order_id=reservation.order_id, quantity=reservation.quantity),
             parse_mode="Markdown"
         )
         
@@ -136,19 +144,20 @@ async def handle_confirm_cancel_reservation(update: Update, context: ContextType
             error=str(e),
             exc_info=True
         )
-        await query.edit_message_text(
-            "❌ Failed to cancel reservation. Please try again or contact support."
-        )
+        await query.edit_message_text(t("reserve_cancel_failed", lang))
 
 
 async def handle_keep_reservation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle keep reservation action (cancelled cancel)."""
     query = update.callback_query
-    await query.answer("Reservation kept")
+    await query.answer()
     
-    await query.edit_message_text(
-        "✅ Reservation kept. Use /myreservations to view your reservations."
-    )
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
+    await query.edit_message_text(t("reserve_kept", lang))
 
 
 def get_cancel_reservation_handler() -> CallbackQueryHandler:

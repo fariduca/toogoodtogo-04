@@ -3,6 +3,7 @@
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters
 
+from src.i18n import t
 from src.logging import get_logger
 from src.models.business import BusinessInput, VerificationStatus
 from src.models.user import UserInput, UserRole
@@ -18,6 +19,7 @@ ROLE_SELECTION, BUSINESS_NAME, STREET_ADDRESS, CITY, POSTAL_CODE, PHONE = range(
 
 async def handle_role_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle role selection from /start command."""
+    lang = context.user_data.get("lang", "en")
     if not context.user_data.get("awaiting_role_selection"):
         # Not in registration flow - don't handle this message
         # Returning None allows other handlers to process it
@@ -34,7 +36,7 @@ async def handle_role_selection(update: Update, context: ContextTypes.DEFAULT_TY
         role = UserRole.CUSTOMER
     else:
         await update.message.reply_text(
-            "Please select a valid role using the keyboard buttons."
+            t("reg_select_role", lang)
         )
         return ROLE_SELECTION
     
@@ -59,19 +61,14 @@ async def handle_role_selection(update: Update, context: ContextTypes.DEFAULT_TY
     if role == UserRole.BUSINESS:
         # Start business registration flow
         await update.message.reply_text(
-            "Great! Let's set up your business profile.\n\n"
-            "Please enter your business name:",
+            t("reg_business_setup", lang),
             reply_markup=ReplyKeyboardRemove(),
         )
         return BUSINESS_NAME
     else:
         # Customer registration complete
         await update.message.reply_text(
-            "✅ You're all set!\n\n"
-            "You can now:\n"
-            "• /browse — Discover nearby deals\n"
-            "• /myreservations — View your reservations\n\n"
-            "Happy shopping! 🛍️",
+            t("reg_customer_complete", lang),
             reply_markup=ReplyKeyboardRemove(),
         )
         return ConversationHandler.END
@@ -79,80 +76,84 @@ async def handle_role_selection(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_business_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle business name input."""
+    lang = context.user_data.get("lang", "en")
     business_name = update.message.text.strip()
     
     if len(business_name) < 2:
         await update.message.reply_text(
-            "Business name is too short. Please enter a valid business name:"
+            t("reg_name_short", lang)
         )
         return BUSINESS_NAME
     
     context.user_data["business_name"] = business_name
     
     await update.message.reply_text(
-        f"Business: {business_name}\n\n"
-        "Now, please enter your street address:"
+        t("reg_name_confirm", lang, name=business_name)
     )
     return STREET_ADDRESS
 
 
 async def handle_street_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle street address input."""
+    lang = context.user_data.get("lang", "en")
     street_address = update.message.text.strip()
     
     if len(street_address) < 5:
         await update.message.reply_text(
-            "Address seems too short. Please enter a complete street address:"
+            t("reg_address_short", lang)
         )
         return STREET_ADDRESS
     
     context.user_data["street_address"] = street_address
     
-    await update.message.reply_text("Please enter your city:")
+    await update.message.reply_text(t("reg_ask_city", lang))
     return CITY
 
 
 async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle city input."""
+    lang = context.user_data.get("lang", "en")
     city = update.message.text.strip()
     
     if len(city) < 2:
         await update.message.reply_text(
-            "City name is too short. Please enter a valid city:"
+            t("reg_city_short", lang)
         )
         return CITY
     
     context.user_data["city"] = city
     
-    await update.message.reply_text("Please enter your postal code:")
+    await update.message.reply_text(t("reg_ask_postal", lang))
     return POSTAL_CODE
 
 
 async def handle_postal_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle postal code input."""
+    lang = context.user_data.get("lang", "en")
     postal_code = update.message.text.strip()
     
     if len(postal_code) < 3:
         await update.message.reply_text(
-            "Postal code is too short. Please enter a valid postal code:"
+            t("reg_postal_short", lang)
         )
         return POSTAL_CODE
     
     context.user_data["postal_code"] = postal_code
     
     await update.message.reply_text(
-        "Finally, please enter your phone number for customer contact:"
+        t("reg_ask_phone", lang)
     )
     return PHONE
 
 
 async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle phone number and complete registration."""
+    lang = context.user_data.get("lang", "en")
     phone = update.message.text.strip()
     
     if len(phone) < 8:
         await update.message.reply_text(
-            "Phone number seems too short. Please enter a valid phone number:"
+            t("reg_phone_short", lang)
         )
         return PHONE
     
@@ -167,7 +168,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     
     if not user or user.role != UserRole.BUSINESS:
         await update.message.reply_text(
-            "❌ Registration error. Please start again with /start"
+            t("reg_error", lang)
         )
         context.user_data.clear()
         return ConversationHandler.END
@@ -196,13 +197,7 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data.clear()
     
     await update.message.reply_text(
-        "✅ Business registration submitted!\n\n"
-        f"Business: {business.business_name}\n"
-        f"Address: {business.venue.street_address}, {business.venue.city} {business.venue.postal_code}\n"
-        f"Phone: {business.contact_phone}\n\n"
-        "Your business is pending admin approval. You'll receive a notification "
-        "once your business is verified and you can start posting deals.\n\n"
-        "This usually takes 1-2 business days. Thank you for your patience! 🙏"
+        t("reg_business_submitted", lang, business_name=business.business_name, address=business.venue.street_address, city=business.venue.city, postal=business.venue.postal_code, phone=business.contact_phone)
     )
     
     return ConversationHandler.END
@@ -210,10 +205,11 @@ async def handle_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 async def cancel_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel registration flow."""
+    lang = context.user_data.get("lang", "en")
     context.user_data.clear()
     
     await update.message.reply_text(
-        "Registration cancelled. You can start again anytime with /start",
+        t("reg_lifecycle_cancelled", lang),
         reply_markup=ReplyKeyboardRemove(),
     )
     

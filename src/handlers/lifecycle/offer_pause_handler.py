@@ -9,6 +9,7 @@ from uuid import UUID
 from telegram import Update
 from telegram.ext import CommandHandler, ContextTypes
 
+from src.i18n import t
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.security.permissions import PermissionChecker
@@ -20,15 +21,13 @@ logger = get_logger(__name__)
 
 async def pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Pause an active offer to prevent new purchases."""
+    lang = context.user_data.get("lang", "en")
     user_id = update.effective_user.id
 
     # Parse offer_id from command args
     if not context.args or len(context.args) < 1:
         await update.message.reply_text(
-            "Usage: /pause <offer_id>\n"
-            "Example: /pause 123e4567-e89b-12d3-a456-426614174000\n\n"
-            "This will temporarily pause your offer, preventing new purchases "
-            "while keeping it visible to customers."
+            t("offer_pause_usage", lang)
         )
         return
 
@@ -58,7 +57,7 @@ async def pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
                 if not offer:
                     await update.message.reply_text(
-                        f"❌ Offer not found: {offer_id_str}"
+                        t("offer_lifecycle_edit_not_found", lang, offer_id=offer_id_str)
                     )
                     return
 
@@ -70,22 +69,20 @@ async def pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     offer.business_id, offer_id, user_id
                 ):
                     await update.message.reply_text(
-                        "❌ You don't have permission to pause this offer."
+                        t("offer_pause_no_permission", lang)
                     )
                     return
 
                 # Check current status
                 if offer.status == OfferStatus.PAUSED:
                     await update.message.reply_text(
-                        f"ℹ️ Offer '{offer.title}' is already paused."
+                        t("offer_pause_already", lang, title=offer.title)
                     )
                     return
 
                 if offer.status != OfferStatus.ACTIVE:
                     await update.message.reply_text(
-                        f"❌ Cannot pause offer '{offer.title}'.\n"
-                        f"Current status: {offer.status.value}\n"
-                        f"Only active offers can be paused."
+                        t("offer_pause_cannot_status", lang, title=offer.title, status=offer.status.value)
                     )
                     return
 
@@ -101,11 +98,7 @@ async def pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
 
                 await update.message.reply_text(
-                    f"⏸️ Offer paused successfully!\n\n"
-                    f"**{offer.title}**\n\n"
-                    f"Your offer is now paused. Customers can still view it, "
-                    f"but they cannot make new purchases.\n\n"
-                    f"To resume, use: /resume {offer_id_str}"
+                    t("offer_pause_success", lang, title=offer.title, offer_id=offer_id_str)
                 )
 
         finally:
@@ -120,22 +113,19 @@ async def pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to pause offer.\n"
-            f"Error: {str(e)}\n\n"
-            "Please try again later."
+            t("offer_pause_failed", lang, error=str(e))
         )
 
 
 async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Resume a paused offer to allow purchases again."""
+    lang = context.user_data.get("lang", "en")
     user_id = update.effective_user.id
 
     # Parse offer_id from command args
     if not context.args or len(context.args) < 1:
         await update.message.reply_text(
-            "Usage: /resume <offer_id>\n"
-            "Example: /resume 123e4567-e89b-12d3-a456-426614174000\n\n"
-            "This will resume your paused offer, allowing customers to purchase again."
+            t("offer_resume_usage", lang)
         )
         return
 
@@ -147,8 +137,7 @@ async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             offer_id = UUID(offer_id_str)
         except ValueError:
             await update.message.reply_text(
-                f"❌ Invalid offer ID format: {offer_id_str}\n"
-                "Please provide a valid UUID."
+                t("offer_resume_invalid_id", lang, offer_id=offer_id_str)
             )
             return
 
@@ -165,7 +154,7 @@ async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
                 if not offer:
                     await update.message.reply_text(
-                        f"❌ Offer not found: {offer_id_str}"
+                        t("offer_lifecycle_edit_not_found", lang, offer_id=offer_id_str)
                     )
                     return
 
@@ -177,30 +166,27 @@ async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     offer.business_id, offer_id, user_id
                 ):
                     await update.message.reply_text(
-                        "❌ You don't have permission to resume this offer."
+                        t("offer_resume_no_permission", lang)
                     )
                     return
 
                 # Check current status
                 if offer.status == OfferStatus.ACTIVE:
                     await update.message.reply_text(
-                        f"ℹ️ Offer '{offer.title}' is already active."
+                        t("offer_resume_already_active", lang, title=offer.title)
                     )
                     return
 
                 if offer.status != OfferStatus.PAUSED:
                     await update.message.reply_text(
-                        f"❌ Cannot resume offer '{offer.title}'.\n"
-                        f"Current status: {offer.status.value}\n"
-                        f"Only paused offers can be resumed."
+                        t("offer_resume_cannot_status", lang, title=offer.title, status=offer.status.value)
                     )
                     return
 
                 # Check if offer has expired
                 if offer.is_expired:
                     await update.message.reply_text(
-                        f"❌ Cannot resume offer '{offer.title}'.\n"
-                        f"This offer has expired and can no longer be resumed."
+                        t("offer_resume_expired_msg", lang, title=offer.title)
                     )
                     return
 
@@ -216,9 +202,7 @@ async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 )
 
                 await update.message.reply_text(
-                    f"▶️ Offer resumed successfully!\n\n"
-                    f"**{offer.title}**\n\n"
-                    f"Your offer is now active again. Customers can browse and purchase."
+                    t("offer_resume_success", lang, title=offer.title)
                 )
 
         finally:
@@ -233,9 +217,7 @@ async def resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             exc_info=True,
         )
         await update.message.reply_text(
-            f"❌ Failed to resume offer.\n"
-            f"Error: {str(e)}\n\n"
-            "Please try again later."
+            t("offer_resume_failed", lang, error=str(e))
         )
 
 
