@@ -29,7 +29,10 @@ from src.handlers.offer_management.edit_handler import (
 )
 from src.handlers.system.settings_handler import (
     handle_toggle_notifications,
+    handle_change_language,
+    handle_set_language,
 )
+from src.handlers.system.start_handler import handle_start_set_language
 from src.logging import get_logger
 
 logger = get_logger(__name__)
@@ -107,4 +110,17 @@ def register_callback_handlers(app: Application) -> None:
         CallbackQueryHandler(handle_toggle_notifications, pattern=r"^toggle_notifications:")
     )
 
-    logger.info("callback_handlers_registered", count=14)
+    # Language switching
+    app.add_handler(
+        CallbackQueryHandler(handle_change_language, pattern=r"^change_language$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(handle_set_language, pattern=r"^set_language:")
+    )
+
+    # Start flow language selection (new users)
+    app.add_handler(
+        CallbackQueryHandler(handle_start_set_language, pattern=r"^start_set_language:")
+    )
+
+    logger.info("callback_handlers_registered", count=17)

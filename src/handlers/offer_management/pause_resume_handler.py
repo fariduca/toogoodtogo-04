@@ -3,9 +3,11 @@
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.storage.postgres_offer_repo import PostgresOfferRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 from uuid import UUID
 
 logger = get_logger(__name__)
@@ -17,6 +19,12 @@ async def handle_pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract offer_id from callback_data (format: "pause_offer:uuid")
     offer_id_str = query.data.split(":")[1]
@@ -26,13 +34,13 @@ async def handle_pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Offer not found.")
+        await query.edit_message_text(t("err_offer_not_found", lang))
         return
     
     # Validate state
     if offer.state != OfferStatus.ACTIVE:
         await query.edit_message_text(
-            f"❌ Cannot pause offer in {offer.state.value} state."
+            t("offer_pause_cannot", lang, state=offer.state.value)
         )
         return
     
@@ -40,9 +48,7 @@ async def handle_pause_offer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     updated_offer = await offer_repo.update_state(offer_id, OfferStatus.PAUSED)
     
     await query.edit_message_text(
-        f"⏸️ **{offer.title}** is now paused.\n\n"
-        "Customers won't see this offer in browse results. "
-        "Use /myoffers to resume it.",
+        t("offer_paused", lang, title=offer.title),
         parse_mode="Markdown"
     )
     
@@ -59,6 +65,12 @@ async def handle_resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract offer_id from callback_data (format: "resume_offer:uuid")
     offer_id_str = query.data.split(":")[1]
@@ -68,21 +80,20 @@ async def handle_resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Offer not found.")
+        await query.edit_message_text(t("err_offer_not_found", lang))
         return
     
     # Validate state
     if offer.state != OfferStatus.PAUSED:
         await query.edit_message_text(
-            f"❌ Cannot resume offer in {offer.state.value} state."
+            t("offer_resume_cannot", lang, state=offer.state.value)
         )
         return
     
     # Check if offer is expired
     if offer.is_expired:
         await query.edit_message_text(
-            f"❌ Cannot resume expired offer. "
-            f"Pickup window ended at {offer.pickup_end_time.strftime('%H:%M')}."
+            t("offer_resume_expired", lang, end_time=offer.pickup_end_time.strftime('%H:%M'))
         )
         return
     
@@ -90,8 +101,7 @@ async def handle_resume_offer(update: Update, context: ContextTypes.DEFAULT_TYPE
     updated_offer = await offer_repo.update_state(offer_id, OfferStatus.ACTIVE)
     
     await query.edit_message_text(
-        f"▶️ **{offer.title}** is now active!\n\n"
-        "Customers can now see and reserve this offer.",
+        t("offer_resumed", lang, title=offer.title),
         parse_mode="Markdown"
     )
     

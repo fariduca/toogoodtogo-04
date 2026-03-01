@@ -6,6 +6,7 @@ from decimal import Decimal
 from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferCategory, OfferInput, OfferStatus
 from src.models.user import UserRole
@@ -31,14 +32,15 @@ async def newdeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if not user:
         await update.message.reply_text(
-            "❌ You need to register first. Use /start to begin."
+            t("offer_need_register", "en")
         )
         return ConversationHandler.END
     
+    lang = get_lang(user)
+    
     if user.role != UserRole.BUSINESS:
         await update.message.reply_text(
-            "❌ Only business accounts can post deals. "
-            "If you're a business, please register with /start"
+            t("offer_business_only", lang)
         )
         return ConversationHandler.END
     
@@ -47,7 +49,7 @@ async def newdeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     if not businesses:
         await update.message.reply_text(
-            "❌ You don't have a registered business yet. Use /start to register."
+            t("offer_no_business", lang)
         )
         return ConversationHandler.END
     
@@ -57,19 +59,16 @@ async def newdeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     permission_checker: PermissionChecker = context.bot_data["permission_checker"]
     if not permission_checker.can_post_offer(user, business):
         await update.message.reply_text(
-            "❌ Your business is still pending verification. "
-            "You'll be notified when you can start posting deals."
+            t("offer_pending_verification", lang)
         )
         return ConversationHandler.END
     
     # Store business in context
     context.user_data["business_id"] = str(business.id)
+    context.user_data["lang"] = lang
     
     await update.message.reply_text(
-        f"🎉 Let's create a new deal for {business.business_name}!\n\n"
-        "First, what's the title of your deal?\n"
-        "Example: Fresh Bakery Box, Mixed Produce Bag, etc.\n\n"
-        "Type /cancel anytime to stop."
+        t("offer_start_creation", lang, business_name=business.business_name)
     )
     
     return TITLE
@@ -77,179 +76,175 @@ async def newdeal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def handle_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle title input."""
+    lang = context.user_data.get("lang", "en")
     title = update.message.text.strip()
     
     if len(title) < 3 or len(title) > 100:
         await update.message.reply_text(
-            "❌ Title must be between 3 and 100 characters. Please try again:"
+            t("offer_title_validation", lang)
         )
         return TITLE
     
     context.user_data["title"] = title
     
     await update.message.reply_text(
-        "Great! Now provide a description (10-200 characters):\n"
-        "Example: Mixed seasonal produce, perfect for soups and salads"
+        t("offer_ask_description", lang)
     )
     return DESCRIPTION
 
 
 async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle description input."""
+    lang = context.user_data.get("lang", "en")
     description = update.message.text.strip()
     
     if len(description) < 10 or len(description) > 200:
         await update.message.reply_text(
-            "❌ Description must be between 10 and 200 characters. Please try again:"
+            t("offer_desc_validation", lang)
         )
         return DESCRIPTION
     
     context.user_data["description"] = description
     
     await update.message.reply_text(
-        "What category best describes this deal?\n"
-        "Options: MEALS, BAKERY, PRODUCE, OTHER\n\n"
-        "Reply with one of these options:"
+        t("offer_ask_category", lang)
     )
     return CATEGORY
 
 
 async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle category input."""
+    lang = context.user_data.get("lang", "en")
     category_text = update.message.text.strip().upper()
     
     try:
         category = OfferCategory(category_text)
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid category. Please choose: MEALS, BAKERY, PRODUCE, or OTHER"
+            t("offer_category_invalid", lang)
         )
         return CATEGORY
     
     context.user_data["category"] = category.value
     
     await update.message.reply_text(
-        "What's the price per unit? (e.g., 5.99)\n"
-        "This is the discounted price customers will pay:"
+        t("offer_ask_price", lang)
     )
     return PRICE
 
 
 async def handle_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle price input."""
+    lang = context.user_data.get("lang", "en")
     try:
         price = Decimal(update.message.text.strip())
         if price <= 0:
             raise ValueError("Price must be positive")
     except (ValueError, Exception):
         await update.message.reply_text(
-            "❌ Invalid price. Please enter a positive number (e.g., 5.99):"
+            t("offer_price_invalid", lang)
         )
         return PRICE
     
     context.user_data["price"] = str(price)
     
     await update.message.reply_text(
-        "How many units are available?\n"
-        "Enter a whole number (e.g., 10):"
+        t("offer_ask_quantity", lang)
     )
     return QUANTITY
 
 
 async def handle_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle quantity input."""
+    lang = context.user_data.get("lang", "en")
     try:
         quantity = int(update.message.text.strip())
         if quantity <= 0:
             raise ValueError("Quantity must be positive")
     except (ValueError, Exception):
         await update.message.reply_text(
-            "❌ Invalid quantity. Please enter a positive whole number:"
+            t("offer_quantity_invalid", lang)
         )
         return QUANTITY
     
     context.user_data["quantity"] = quantity
     
     await update.message.reply_text(
-        "When can customers start picking up?\n"
-        "Enter the start time in format: YYYY-MM-DD HH:MM\n"
-        "Example: 2025-11-30 14:00"
+        t("offer_ask_pickup_start", lang)
     )
     return PICKUP_START
 
 
 async def handle_pickup_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle pickup start time input."""
+    lang = context.user_data.get("lang", "en")
     try:
         pickup_start = datetime.strptime(update.message.text.strip(), "%Y-%m-%d %H:%M")
         
         if pickup_start <= datetime.utcnow():
             await update.message.reply_text(
-                "❌ Pickup start time must be in the future. Please try again:"
+                t("offer_pickup_start_past", lang)
             )
             return PICKUP_START
         
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Use: YYYY-MM-DD HH:MM\n"
-            "Example: 2025-11-30 14:00"
+            t("offer_pickup_format_invalid", lang)
         )
         return PICKUP_START
     
     context.user_data["pickup_start"] = pickup_start.isoformat()
     
     await update.message.reply_text(
-        "When should pickup end?\n"
-        "Enter the end time in format: YYYY-MM-DD HH:MM\n"
-        "Example: 2025-11-30 18:00"
+        t("offer_ask_pickup_end", lang)
     )
     return PICKUP_END
 
 
 async def handle_pickup_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle pickup end time input."""
+    lang = context.user_data.get("lang", "en")
     try:
         pickup_end = datetime.strptime(update.message.text.strip(), "%Y-%m-%d %H:%M")
         pickup_start = datetime.fromisoformat(context.user_data["pickup_start"])
         
         if pickup_end <= pickup_start:
             await update.message.reply_text(
-                "❌ Pickup end time must be after start time. Please try again:"
+                t("offer_pickup_end_before_start", lang)
             )
             return PICKUP_END
         
         time_window = pickup_end - pickup_start
         if time_window > timedelta(hours=24):
             await update.message.reply_text(
-                "❌ Pickup window cannot exceed 24 hours. Please enter a shorter end time:"
+                t("offer_pickup_window_exceeded", lang)
             )
             return PICKUP_END
         
     except ValueError:
         await update.message.reply_text(
-            "❌ Invalid format. Use: YYYY-MM-DD HH:MM\n"
-            "Example: 2025-11-30 18:00"
+            t("offer_pickup_end_format_invalid", lang)
         )
         return PICKUP_END
     
     context.user_data["pickup_end"] = pickup_end.isoformat()
     
     await update.message.reply_text(
-        "Would you like to add a photo of your deal?\n"
-        "Send a photo now, or type SKIP to continue without a photo."
+        t("offer_ask_photo", lang)
     )
     return PHOTO
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle photo upload."""
+    lang = context.user_data.get("lang", "en")
     if update.message.text and update.message.text.strip().upper() == "SKIP":
         context.user_data["photo_url"] = None
         return await show_confirmation(update, context)
     
     if not update.message.photo:
         await update.message.reply_text(
-            "Please send a photo, or type SKIP to continue without one."
+            t("offer_photo_prompt", lang)
         )
         return PHOTO
     
@@ -260,26 +255,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     # TODO: Upload to Azure Blob Storage using ImageProcessingService
     # For now, store file_id for later download
     
-    await update.message.reply_text("✅ Photo received!")
+    await update.message.reply_text(t("offer_photo_received", lang))
     
     return await show_confirmation(update, context)
 
 
 async def show_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show deal summary and ask for confirmation."""
+    lang = context.user_data.get("lang", "en")
     pickup_start = datetime.fromisoformat(context.user_data["pickup_start"])
     pickup_end = datetime.fromisoformat(context.user_data["pickup_end"])
     
-    summary = (
-        "📋 Deal Summary:\n\n"
-        f"**Title:** {context.user_data['title']}\n"
-        f"**Description:** {context.user_data['description']}\n"
-        f"**Category:** {context.user_data['category']}\n"
-        f"**Price:** ${context.user_data['price']} per unit\n"
-        f"**Quantity:** {context.user_data['quantity']} units\n"
-        f"**Pickup Window:** {pickup_start.strftime('%b %d, %H:%M')} - {pickup_end.strftime('%H:%M')}\n"
-        f"**Photo:** {'Yes ✅' if context.user_data.get('photo_file_id') else 'No'}\n\n"
-        "Reply YES to publish this deal, or NO to cancel."
+    has_photo = t("offer_photo_yes", lang) if context.user_data.get("photo_file_id") else t("offer_photo_no", lang)
+    
+    summary = t(
+        "offer_summary",
+        lang,
+        title=context.user_data["title"],
+        description=context.user_data["description"],
+        category=context.user_data["category"],
+        price=context.user_data["price"],
+        quantity=context.user_data["quantity"],
+        pickup_start=pickup_start.strftime("%b %d, %H:%M"),
+        pickup_end=pickup_end.strftime("%H:%M"),
+        has_photo=has_photo,
     )
     
     await update.message.reply_text(summary)
@@ -290,9 +289,11 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle final confirmation and create offer."""
     response = update.message.text.strip().upper()
     
+    lang = context.user_data.get("lang", "en")
+    
     if response != "YES":
         await update.message.reply_text(
-            "❌ Deal creation cancelled. Use /newdeal to start over.",
+            t("offer_creation_cancelled", lang),
             reply_markup=ReplyKeyboardRemove(),
         )
         context.user_data.clear()
@@ -335,13 +336,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Send success message
     await update.message.reply_text(
-        f"🎉 Deal published successfully!\n\n"
-        f"**{offer.title}**\n"
-        f"Customers can now discover and reserve your deal.\n\n"
-        f"Share this link to promote your deal:\n{share_link}\n\n"
-        "Commands:\n"
-        "• /mydeals — Manage your deals\n"
-        "• /newdeal — Create another deal",
+        t("offer_published", lang, title=offer.title, share_link=share_link),
         reply_markup=ReplyKeyboardRemove(),
     )
     
@@ -351,9 +346,10 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def cancel_newdeal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel deal creation."""
+    lang = context.user_data.get("lang", "en")
     context.user_data.clear()
     await update.message.reply_text(
-        "Deal creation cancelled.",
+        t("offer_cancel_newdeal", lang),
         reply_markup=ReplyKeyboardRemove(),
     )
     return ConversationHandler.END

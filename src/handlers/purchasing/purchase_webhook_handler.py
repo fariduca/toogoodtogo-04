@@ -6,10 +6,14 @@ Will be extended when online payments are enabled.
 
 from telegram.ext import ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.purchase import PurchaseStatus
 from src.services.stripe_checkout import StripeCheckoutService
 from src.storage.postgres_purchase_repo import PostgresPurchaseRepository
+
+# Note: This handler processes server-to-server Stripe webhooks.
+# No user-facing strings currently — all responses are machine-readable dicts.
 
 logger = get_logger(__name__)
 

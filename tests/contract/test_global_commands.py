@@ -267,16 +267,19 @@ async def test_start_shows_role_selection_for_new_users():
     
     await start_command(update, context)
     
-    # Should show role selection
-    update.message.reply_text.assert_called_once()
-    call_args = update.message.reply_text.call_args
+    # Should show role selection (first call) and language button (second call)
+    assert update.message.reply_text.call_count == 2
     
-    text = call_args[0][0]
+    # First call: welcome message with role keyboard
+    first_call = update.message.reply_text.call_args_list[0]
+    text = first_call[0][0]
     assert "Welcome" in text
     assert "role" in text.lower()
+    assert "reply_markup" in first_call[1]
     
-    # Should have reply keyboard
-    assert "reply_markup" in call_args[1]
+    # Second call: language selection button
+    second_call = update.message.reply_text.call_args_list[1]
+    assert "reply_markup" in second_call[1]
 
 
 @pytest.mark.asyncio

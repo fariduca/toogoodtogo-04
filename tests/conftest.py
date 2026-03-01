@@ -36,6 +36,7 @@ def mock_telegram_update():
     update.effective_user = Mock()
     update.effective_user.id = 12345
     update.effective_user.username = "testuser"
+    update.effective_user.language_code = "en"
     update.message = Mock()
     update.message.text = "/start"
     return update

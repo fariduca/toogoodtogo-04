@@ -12,10 +12,12 @@ from decimal import Decimal
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.purchase import PurchaseRequest
 from src.services.purchase_flow import PurchaseFlowService
 from src.storage.postgres_offer_repo import PostgresOfferRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -27,10 +29,18 @@ async def initiate_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     user_id = update.effective_user.id
 
+    # Resolve user language
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    if not user:
+        await query.edit_message_text(t("err_register_first", "en"))
+        return
+    lang = get_lang(user)
+
     # Parse offer_id from callback data
     callback_data = query.data
     if not callback_data.startswith("purchase:"):
-        await query.edit_message_text("❌ Invalid purchase action.")
+        await query.edit_message_text(t("purchase_invalid_action", lang))
         return
 
     offer_id = callback_data.split(":", 1)[1]
@@ -47,18 +57,12 @@ async def initiate_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         #     return
 
         # Show item selection interface
-        message_text = (
-            f"🛒 **Purchase Items**\n\n"
-            f"Offer ID: {offer_id}\n\n"
-            "Select items to purchase:\n\n"
-            "Database query implementation pending.\n\n"
-            "For MVP: Cash payment at venue."
-        )
+        message_text = t("purchase_items_header", lang, offer_id=offer_id)
 
         # Create item selection buttons
         keyboard = [
-            [InlineKeyboardButton("Confirm Cash Purchase", callback_data=f"confirm_cash:{offer_id}")],
-            [InlineKeyboardButton("« Cancel", callback_data="back_to_offers")],
+            [InlineKeyboardButton(t("btn_confirm_cash", lang), callback_data=f"confirm_cash:{offer_id}")],
+            [InlineKeyboardButton(t("btn_cancel", lang), callback_data="back_to_offers")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -70,7 +74,7 @@ async def initiate_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     except Exception as e:
         logger.error("purchase_initiation_failed", error=str(e), exc_info=True)
-        await query.edit_message_text("❌ Failed to initiate purchase.")
+        await query.edit_message_text(t("purchase_initiate_failed", lang))
 
 
 async def confirm_cash_purchase(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -80,10 +84,15 @@ async def confirm_cash_purchase(update: Update, context: ContextTypes.DEFAULT_TY
 
     user_id = update.effective_user.id
 
+    # Resolve user language
+    user_repo: PostgresUserRepository = context.bot_data.get("user_repo")
+    user = await user_repo.get_by_telegram_id(user_id) if user_repo else None
+    lang = get_lang(user) if user else "en"
+
     # Parse offer_id from callback data
     callback_data = query.data
     if not callback_data.startswith("confirm_cash:"):
-        await query.edit_message_text("❌ Invalid confirmation.")
+        await query.edit_message_text(t("purchase_invalid_confirmation", lang))
         return
 
     offer_id = callback_data.split(":", 1)[1]
@@ -123,22 +132,13 @@ async def confirm_cash_purchase(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
         # TODO: Get venue details for pickup instructions
-        message_text = (
-            "✅ **Purchase Confirmed!**\n\n"
-            f"Offer ID: {offer_id}\n"
-            "Payment: Cash at venue\n\n"
-            "📍 Pickup Instructions:\n"
-            "Visit the venue during the offer time window.\n"
-            "Show this confirmation to the business.\n\n"
-            "Your reservation is held. Please arrive on time!\n\n"
-            "Use /cancel <purchase_id> if you need to cancel."
-        )
+        message_text = t("purchase_confirmed", lang, offer_id=offer_id)
 
         await query.edit_message_text(message_text, parse_mode="Markdown")
 
     except Exception as e:
         logger.error("cash_purchase_failed", error=str(e), exc_info=True)
-        await query.edit_message_text("❌ Purchase confirmation failed. Please try again.")
+        await query.edit_message_text(t("purchase_confirm_failed", lang))
 
 
 def get_purchase_initiation_handlers() -> list:

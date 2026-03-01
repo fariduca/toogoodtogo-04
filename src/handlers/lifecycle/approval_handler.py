@@ -5,6 +5,7 @@ from uuid import UUID
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.business import VerificationStatus
 from src.security.permissions import PermissionChecker
@@ -18,10 +19,13 @@ async def list_pending_businesses(update: Update, context: ContextTypes.DEFAULT_
     """List all pending business registrations (admin only)."""
     telegram_user = update.effective_user
     permission_checker: PermissionChecker = context.bot_data["permission_checker"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    admin_user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(admin_user) if admin_user else "en"
     
     # Check admin permission
     if not permission_checker.is_admin(telegram_user.id):
-        await update.message.reply_text("❌ This command is only available to admins.")
+        await update.message.reply_text(t("approval_admin_only", lang))
         return
     
     business_repo: PostgresBusinessRepository = context.bot_data["business_repo"]
@@ -30,11 +34,11 @@ async def list_pending_businesses(update: Update, context: ContextTypes.DEFAULT_
     pending = await business_repo.get_by_verification_status(VerificationStatus.PENDING)
     
     if not pending:
-        await update.message.reply_text("No pending business registrations.")
+        await update.message.reply_text(t("approval_none_pending", lang))
         return
     
     # Build list with approval buttons
-    text = "📋 Pending Business Registrations:\n\n"
+    text = t("approval_pending_header", lang)
     
     for business in pending:
         text += (
@@ -49,13 +53,13 @@ async def list_pending_businesses(update: Update, context: ContextTypes.DEFAULT_
     for business in pending:
         keyboard.append([
             InlineKeyboardButton(
-                f"✅ Approve: {business.business_name[:20]}...",
+                t("btn_approve", lang, name=business.business_name[:20]),
                 callback_data=f"approve_business:{business.id}",
             )
         ])
         keyboard.append([
             InlineKeyboardButton(
-                f"❌ Reject: {business.business_name[:20]}...",
+                t("btn_reject", lang, name=business.business_name[:20]),
                 callback_data=f"reject_business:{business.id}",
             )
         ])
@@ -74,7 +78,7 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
     
     # Check admin permission
     if not permission_checker.is_admin(telegram_user.id):
-        await query.edit_message_text("❌ Unauthorized action.")
+        await query.edit_message_text(t("err_unauthorized", "en"))
         return
     
     # Extract business ID from callback data
@@ -83,6 +87,8 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
     
     business_repo: PostgresBusinessRepository = context.bot_data["business_repo"]
     user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    admin_user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(admin_user) if admin_user else "en"
     
     # Approve business
     business = await business_repo.approve_business(
@@ -91,7 +97,7 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
     )
     
     if not business:
-        await query.edit_message_text("❌ Business not found.")
+        await query.edit_message_text(t("err_business_not_found", lang))
         return
     
     logger.info(
@@ -105,13 +111,8 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
     owner = await user_repo.get_by_id(business.owner_id)
     if owner:
         try:
-            notification_text = (
-                f"🎉 Great news! Your business '{business.business_name}' has been approved!\n\n"
-                "You can now start posting deals:\n"
-                "• /newdeal — Create your first deal\n"
-                "• /myoffers — Manage your offers\n\n"
-                "Welcome to TooGoodToGo! 🚀"
-            )
+            owner_lang = get_lang(owner) if owner else "en"
+            notification_text = t("notif_business_approved", owner_lang, business_name=business.business_name)
             
             await context.bot.send_message(
                 chat_id=owner.telegram_user_id,
@@ -126,8 +127,7 @@ async def handle_approve_business(update: Update, context: ContextTypes.DEFAULT_
             )
     
     await query.edit_message_text(
-        f"✅ Business '{business.business_name}' has been approved!\n"
-        f"Owner has been notified."
+        t("approval_business_approved", lang, business_name=business.business_name)
     )
 
 
@@ -141,7 +141,7 @@ async def handle_reject_business(update: Update, context: ContextTypes.DEFAULT_T
     
     # Check admin permission
     if not permission_checker.is_admin(telegram_user.id):
-        await query.edit_message_text("❌ Unauthorized action.")
+        await query.edit_message_text(t("err_unauthorized", "en"))
         return
     
     # Extract business ID from callback data
@@ -150,11 +150,13 @@ async def handle_reject_business(update: Update, context: ContextTypes.DEFAULT_T
     
     business_repo: PostgresBusinessRepository = context.bot_data["business_repo"]
     user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    admin_user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(admin_user) if admin_user else "en"
     
     # Get business and update status
     business = await business_repo.get_by_id(business_id)
     if not business:
-        await query.edit_message_text("❌ Business not found.")
+        await query.edit_message_text(t("err_business_not_found", lang))
         return
     
     # Update to REJECTED status
@@ -172,12 +174,8 @@ async def handle_reject_business(update: Update, context: ContextTypes.DEFAULT_T
     owner = await user_repo.get_by_id(business.owner_id)
     if owner:
         try:
-            notification_text = (
-                f"Thank you for your interest in TooGoodToGo.\n\n"
-                f"Unfortunately, your business registration for '{business.business_name}' "
-                "could not be approved at this time.\n\n"
-                "If you believe this is an error, please contact support."
-            )
+            owner_lang = get_lang(owner) if owner else "en"
+            notification_text = t("notif_business_rejected", owner_lang, business_name=business.business_name)
             
             await context.bot.send_message(
                 chat_id=owner.telegram_user_id,
@@ -192,8 +190,7 @@ async def handle_reject_business(update: Update, context: ContextTypes.DEFAULT_T
             )
     
     await query.edit_message_text(
-        f"❌ Business '{business.business_name}' has been rejected.\n"
-        f"Owner has been notified."
+        t("approval_business_rejected", lang, business_name=business.business_name)
     )
 
 

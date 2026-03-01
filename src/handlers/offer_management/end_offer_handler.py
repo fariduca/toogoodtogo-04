@@ -4,9 +4,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 from uuid import UUID
 
+from src.i18n import t, get_lang
 from src.logging import get_logger
 from src.models.offer import OfferStatus
 from src.storage.postgres_offer_repo import PostgresOfferRepository
+from src.storage.postgres_user_repo import PostgresUserRepository
 
 logger = get_logger(__name__)
 
@@ -17,6 +19,12 @@ async def handle_end_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.answer()
     
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract offer_id from callback_data (format: "end_offer:uuid")
     offer_id_str = query.data.split(":")[1]
@@ -26,30 +34,27 @@ async def handle_end_offer(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Offer not found.")
+        await query.edit_message_text(t("err_offer_not_found", lang))
         return
     
     # Validate state
     if offer.state not in [OfferStatus.ACTIVE, OfferStatus.PAUSED]:
         await query.edit_message_text(
-            f"❌ Cannot end offer in {offer.state.value} state."
+            t("offer_end_cannot", lang, state=offer.state.value)
         )
         return
     
     # Show confirmation prompt
     keyboard = [
         [
-            InlineKeyboardButton("✅ Yes, end now", callback_data=f"confirm_end:{offer_id}"),
-            InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_end:{offer_id}"),
+            InlineKeyboardButton(t("btn_confirm_end", lang), callback_data=f"confirm_end:{offer_id}"),
+            InlineKeyboardButton(t("btn_cancel_end", lang), callback_data=f"cancel_end:{offer_id}"),
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"🛑 **End {offer.title}?**\n\n"
-        f"This will permanently end the offer and remove it from customer view.\n"
-        f"Currently {offer.quantity_remaining} units remaining.\n\n"
-        "This action cannot be undone.",
+        t("offer_end_prompt", lang, title=offer.title, remaining=offer.quantity_remaining),
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -61,6 +66,12 @@ async def handle_confirm_end(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     
     offer_repo: PostgresOfferRepository = context.bot_data["offer_repo"]
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    
+    # Resolve user language
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
     
     # Extract offer_id from callback_data (format: "confirm_end:uuid")
     offer_id_str = query.data.split(":")[1]
@@ -70,15 +81,14 @@ async def handle_confirm_end(update: Update, context: ContextTypes.DEFAULT_TYPE)
     offer = await offer_repo.get_by_id(offer_id)
     
     if not offer:
-        await query.edit_message_text("❌ Offer not found.")
+        await query.edit_message_text(t("err_offer_not_found", lang))
         return
     
     # Update state to EXPIRED_EARLY
     updated_offer = await offer_repo.update_state(offer_id, OfferStatus.EXPIRED_EARLY)
     
     await query.edit_message_text(
-        f"🛑 **{offer.title}** has been ended.\n\n"
-        "The offer is no longer visible to customers.",
+        t("offer_ended", lang, title=offer.title),
         parse_mode="Markdown"
     )
     
@@ -92,11 +102,16 @@ async def handle_confirm_end(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_cancel_end(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle cancelled end offer action."""
+    user_repo: PostgresUserRepository = context.bot_data["user_repo"]
+    telegram_user = update.effective_user
+    user = await user_repo.get_by_telegram_id(telegram_user.id)
+    lang = get_lang(user) if user else "en"
+    
     query = update.callback_query
     await query.answer("Cancelled")
     
     await query.edit_message_text(
-        "✅ Offer ending cancelled. Use /myoffers to manage your offers."
+        t("offer_end_cancelled", lang)
     )
 
 
